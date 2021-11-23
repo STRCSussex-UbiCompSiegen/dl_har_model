@@ -17,13 +17,13 @@ import numpy as np
 import torch
 import wandb
 from sklearn.utils import class_weight
-from torch import nn, optim
 from torch.utils.data import DataLoader
 
 from dl_har_model.eval import eval_one_epoch
 from dl_har_model.model.DeepConvLSTM import DeepConvLSTM
 from utils import paint, AverageMeter
-from dl_har_model.model_utils import init_weights, apply_sliding_window
+from dl_har_model.model_utils import init_weights, apply_sliding_window, init_loss, init_optimizer, init_scheduler
+
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
 
@@ -109,6 +109,46 @@ def cross_validate(dataset, valid_type, args, verbose=False):
                                                         title="Validation f1-score (macro)")})
             wandb.log({"val_fw": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=all_v_fw, keys=sbj_keys,
                                                         title="Validation f1-score (weighted)")})
+    elif valid_type == 'split':
+        if verbose:
+            print(paint("Applying Train-Valid Split ..."))
+
+        val_data, train_data = dataset.train_valid_split(args['train_sbjs'], args['valid_sbjs'])
+        train_x, train_y = apply_sliding_window(train_data[:, :-1], train_data[:, -1], dataset.window, dataset.stride)
+        valid_x, valid_y = apply_sliding_window(val_data[:, :-1], val_data[:, -1], dataset.window, dataset.stride)
+        train_data = copy(dataset).alter_data(train_x[:, :, 1:], train_y, 'train')
+        val_data = copy(dataset).alter_data(valid_x[:, :, 1:], valid_y, 'val')
+
+        t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw = train_model(train_data, val_data, args, verbose)
+
+        if verbose:
+            print("Avg. Train Loss: {:.4f}".format(np.mean(t_loss)),
+                  "Train Acc: {:.4f}".format(t_acc[-1]),
+                  "Train F1 (M): {:.4f}".format(t_fm[-1]),
+                  "Train F1 (W): {:.4f}".format(t_fw[-1]),
+                  "\nValid Loss: {:.4f}".format(np.mean(v_loss)),
+                  "Valid Acc: {:.4f}".format(v_acc[-1]),
+                  "Valid F1 (M): {:.4f}".format(v_fm[-1]),
+                  "Valid F1 (W): {:.4f}".format(v_fw[-1]))
+
+        if args['wandb_logging']:
+            wandb.log(
+                {"train_loss": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[t_loss], keys=['split'],
+                                                      title="Training loss")})
+            wandb.log({"train_acc": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[t_acc], keys=['split'],
+                                                           title="Training accuracy")})
+            wandb.log({"train_fm": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[t_fm], keys=['split'],
+                                                          title="Training f1-score (macro)")})
+            wandb.log({"train_fw": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[t_fw], keys=['split'],
+                                                          title="Training f1-score (weighted)")})
+            wandb.log({"val_loss": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[v_loss], keys=['split'],
+                                                          title="Validation loss")})
+            wandb.log({"val_acc": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[v_acc], keys=['split'],
+                                                         title="Validation accuracy")})
+            wandb.log({"val_fm": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[v_fm], keys=['split'],
+                                                        title="Validation f1-score (macro)")})
+            wandb.log({"val_fw": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[v_fw], keys=['split'],
+                                                        title="Validation f1-score (weighted)")})
 
     elapsed = round(time.time() - start_time)
     elapsed = str(timedelta(seconds=elapsed))
@@ -151,24 +191,18 @@ def train_model(train_data, val_data, args, verbose=False):
                                                       y=train_data.target + 1)
 
     if train_on_gpu:
-        criterion = nn.CrossEntropyLoss(reduction="mean").cuda()
+        criterion = init_loss(args).cuda()
         if args['use_weights']:
             criterion.weights = class_weights
     else:
-        criterion = nn.CrossEntropyLoss(reduction='mean')
+        criterion = init_loss(args)
         if args['use_weights']:
             criterion.weights = class_weights
 
-    params = filter(lambda p: p.requires_grad, model.parameters())
-
-    if args['optimizer'] == "Adam":
-        optimizer = optim.Adam(params, lr=args['lr'])
-    elif args['optimizer'] == "RMSprop":
-        optimizer = optim.RMSprop(params, lr=args['lr'])
+    optimizer = init_optimizer(model, args)
 
     if args['lr_step'] > 0:
-        if args['lr_schedule'] == 'step':
-            scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args['lr_step'], gamma=args['lr_decay'])
+        scheduler = init_scheduler(optimizer, args)
 
     if verbose:
         print(paint("[-] Initializing weights (" + args['weights_init'] + ")..."))

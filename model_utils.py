@@ -70,6 +70,42 @@ def init_weights(network):
     return network
 
 
+def init_loss(config):
+    """
+    Initialises an loss object for a given network.
+
+    :return: loss object
+    """
+    if config['loss'] == 'cross-entropy':
+        criterion = nn.CrossEntropyLoss(label_smoothing=config['smoothing'])
+    return criterion
+
+
+def init_optimizer(network, config):
+    """
+    Initialises an optimizer object for a given network.
+
+    :param network: network for which optimizer and loss are to be initialised
+    :return: optimizer object
+    """
+    # define optimizer and loss
+    if config['optimizer'] == 'adadelta':
+        opt = torch.optim.Adadelta(network.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
+    elif config['optimizer'] == 'adam':
+        opt = torch.optim.Adam(network.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
+    elif config['optimizer'] == 'rmsprop':
+        opt = torch.optim.RMSprop(network.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
+    return opt
+
+
+def init_scheduler(optimizer, config):
+    if config['lr_schedule'] == 'step':
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, config['lr_step'], config['lr_decay'])
+    elif config['lr_schedule'] == 'plateau':
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=config['lr_step'], factor=config['lr_decay'])
+    return scheduler
+
+
 def sliding_window_samples(data, samples_per_window, overlap_ratio):
     """
     Return a sliding window measured in number of samples over a data array.
