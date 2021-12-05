@@ -14,20 +14,22 @@ from copy import copy
 from datetime import timedelta
 
 import numpy as np
+import pandas as pd
 import torch
-import wandb
 from sklearn.utils import class_weight
 from torch.utils.data import DataLoader
 
-from dl_har_model.eval import eval_one_epoch
+from dl_har_dataloader.datasets import SensorDataset
+from dl_har_model.eval import eval_one_epoch, eval_model
 from dl_har_model.model.DeepConvLSTM import DeepConvLSTM
 from utils import paint, AverageMeter
-from dl_har_model.model_utils import init_weights, apply_sliding_window, init_loss, init_optimizer, init_scheduler
+from dl_har_model.model_utils import init_weights, apply_sliding_window, init_loss, init_optimizer, init_scheduler, \
+    seed_torch
 
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
 
-def cross_validate(dataset, valid_type, args, verbose=False):
+def cross_validate(valid_type, args, verbose=False):
     """
     Train model for a number of epochs.
 
@@ -46,7 +48,6 @@ def cross_validate(dataset, valid_type, args, verbose=False):
                     'lr_decay': float, factor by which to  decay the learning rate. Default 0.9.
                     'init_weights': str, How to initialize weights. Options 'orthogonal' or None. Default 'orthogonal'.
                     'epochs': int, Total number of epochs to train the model for. Default 300.
-                    'print_freq': int, How often to print loss during each epoch if verbose=True. Default 100.
 
     :param verbose: A boolean indicating whether or not to print results.
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs
@@ -55,35 +56,127 @@ def cross_validate(dataset, valid_type, args, verbose=False):
         print(paint("Running HAR training loop ..."))
     start_time = time.time()
 
-    if valid_type == 'loso':
+    config_dataset = {
+        "dataset": args['dataset'],
+        "window": args['window'],
+        "stride": args['stride'],
+        "stride_test": args['stride_test'],
+        "path_processed": f"data/{args['dataset']}",
+    }
+
+    results_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 't_loss', 't_acc', 't_fm', 't_fw', 'v_loss', 'v_acc',
+                                          'v_fm', 'v_fw'])
+    test_results_array = pd.DataFrame(columns=['v_type', 'seed', 'test_loss', 'test_acc', 'test_fm', 'test_fw'])
+
+    preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
+
+    for seed in args['seeds']:
         if verbose:
-            print(paint("Applying Leave-One-Subject-Out Cross-Validation ..."))
-        sbj_keys = []
-        all_t_loss, all_t_acc, all_t_fm, all_t_fw = [], [], [], []
-        all_v_loss, all_v_acc, all_v_fm, all_v_fw = [], [], [], []
-        for sbj in range(dataset.num_sbj):
-            val_data, train_data = dataset.loso_split(sbj)
-            train_x, train_y = apply_sliding_window(train_data[:, :-1], train_data[:, -1], dataset.window,
-                                                    dataset.stride)
-            valid_x, valid_y = apply_sliding_window(val_data[:, :-1], val_data[:, -1], dataset.window, dataset.stride)
-            train_data = copy(dataset).alter_data(train_x[:, :, 1:], train_y, 'train')
-            val_data = copy(dataset).alter_data(valid_x[:, :, 1:], valid_y, 'val')
+            print(paint("Running with random seed set to {0}...".format(str(seed))))
+        seed_torch(seed)
+        if valid_type == 'loso':
+            if verbose:
+                print(paint("Applying Leave-One-Subject-Out Cross-Validation ..."))
 
-            t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw = train_model(train_data, val_data, args, verbose)
+            dataset = SensorDataset(**config_dataset)
 
-            sbj_keys.append('sbj' + str(sbj))
-            all_t_loss.append(t_loss)
-            all_t_acc.append(t_acc)
-            all_t_fm.append(t_fm)
-            all_t_fw.append(t_fw)
-            all_v_loss.append(v_loss)
-            all_v_acc.append(v_acc)
-            all_v_fm.append(v_fm)
-            all_v_fw.append(v_fw)
+            args['n_classes'] = dataset.n_classes
+            args['n_channels'] = dataset.n_channels
+
+            for sbj in range(dataset.num_sbj):
+                t_data, v_data = dataset.loso_split(sbj)
+                if verbose:
+                    print(paint("Training Subject {0}/{1} ...".format(str(sbj + 1), dataset.num_sbj)))
+                    print(paint("Train Dataset Size: {0}".format(len(t_data))))
+                    print(paint("Valid Dataset Size: {0}".format(len(v_data))))
+
+                t_data = copy(dataset).alter_data(t_data[:, :-1], t_data[:, -1], 'train')
+                v_data = copy(dataset).alter_data(v_data[:, :-1], v_data[:, -1], 'val')
+
+                # Normalize data wrt. statistics of the training set
+                mean = np.mean(t_data.data[:, 1:], axis=0)
+                std = np.std(t_data.data[:, 1:], axis=0)
+
+                t_data.normalize(mean, std)
+                v_data.normalize(mean, std)
+
+                train_x, train_y = apply_sliding_window(t_data.data, t_data.target, t_data.window, t_data.stride)
+                valid_x, valid_y = apply_sliding_window(v_data.data, v_data.target, v_data.window, v_data.stride)
+
+                t_data = t_data.alter_data(train_x[:, :, 1:], train_y, 'train')
+                v_data = v_data.alter_data(valid_x[:, :, 1:], valid_y, 'val')
+
+                t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, model, criterion = train_model(t_data, v_data, args, verbose)
+
+                results_row = {'v_type': 'loso',
+                               'seed': seed,
+                               'sbj': sbj,
+                               't_loss': t_loss,
+                               't_acc': t_acc,
+                               't_fm': t_fm,
+                               't_fw': t_fw,
+                               'v_loss': v_loss,
+                               'v_acc': v_acc,
+                               'v_fm': v_fm,
+                               'v_fw': v_fw
+                               }
+                results_array = results_array.append(results_row, ignore_index=True)
+
+                _, _, _, _, _, val_preds = eval_model(model, criterion, v_data, args)
+
+                preds_row = {'v_type': 'loso',
+                             'seed': seed,
+                             'sbj': sbj,
+                             'val_preds': val_preds.tolist(),
+                             'test_preds': None,
+                             }
+
+                preds_array = preds_array.append(preds_row, ignore_index=True)
+
+                if verbose:
+                    print("SUBJECT: {}/{}".format(sbj + 1, dataset.num_sbj),
+                          "\nAvg. Train Loss: {:.4f}".format(np.mean(t_loss)),
+                          "Train Acc: {:.4f}".format(t_acc[-1]),
+                          "Train F1 (M): {:.4f}".format(t_fm[-1]),
+                          "Train F1 (W): {:.4f}".format(t_fw[-1]),
+                          "\nValid Loss: {:.4f}".format(np.mean(v_loss)),
+                          "Valid Acc: {:.4f}".format(v_acc[-1]),
+                          "Valid F1 (M): {:.4f}".format(v_fm[-1]),
+                          "Valid F1 (W): {:.4f}".format(v_fw[-1]))
+
+        elif valid_type == 'split':
+            if verbose:
+                print(paint("Applying Train-Valid Split ..."))
+            config_dataset['prefix'] = 'train'
+            t_data = SensorDataset(**config_dataset)
+            config_dataset['prefix'] = 'val'
+            v_data = SensorDataset(**config_dataset)
+            config_dataset['prefix'] = 'test'
+            test_data = SensorDataset(**config_dataset)
+
+            # Normalize data wrt. statistics of the training set
+            mean = np.mean(t_data.data[:, 1:], axis=0)
+            std = np.std(t_data.data[:, 1:], axis=0)
+
+            t_data.normalize(mean, std)
+            v_data.normalize(mean, std)
+            test_data.normalize(mean, std)
+
+            args['n_classes'] = t_data.n_classes
+            args['n_channels'] = t_data.n_channels
+
+            train_x, train_y = apply_sliding_window(t_data.data, t_data.target, t_data.window, t_data.stride)
+            valid_x, valid_y = apply_sliding_window(v_data.data, v_data.target, v_data.window, v_data.stride)
+            test_x, test_y = apply_sliding_window(v_data.data, v_data.target, v_data.window, v_data.stride_test)
+
+            t_data = t_data.alter_data(train_x[:, :, 1:], train_y, 'train')
+            v_data = v_data.alter_data(valid_x[:, :, 1:], valid_y, 'val')
+            test_data.alter_data(test_x[:, :, 1:], test_y, 'test')
+
+            t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, model, criterion = train_model(t_data, v_data, args, verbose)
 
             if verbose:
-                print("SUBJECT: {}/{}".format(sbj + 1, dataset.num_sbj),
-                      "\nAvg. Train Loss: {:.4f}".format(np.mean(t_loss)),
+                print("Avg. Train Loss: {:.4f}".format(np.mean(t_loss)),
                       "Train Acc: {:.4f}".format(t_acc[-1]),
                       "Train F1 (M): {:.4f}".format(t_fm[-1]),
                       "Train F1 (W): {:.4f}".format(t_fw[-1]),
@@ -92,69 +185,52 @@ def cross_validate(dataset, valid_type, args, verbose=False):
                       "Valid F1 (M): {:.4f}".format(v_fm[-1]),
                       "Valid F1 (W): {:.4f}".format(v_fw[-1]))
 
-        if args['wandb_logging']:
-            wandb.log({"train_loss": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=all_t_loss, keys=sbj_keys,
-                                                            title="Training loss")})
-            wandb.log({"train_acc": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=all_t_acc, keys=sbj_keys,
-                                                           title="Training accuracy")})
-            wandb.log({"train_fm": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=all_t_fm, keys=sbj_keys,
-                                                          title="Training f1-score (macro)")})
-            wandb.log({"train_fw": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=all_t_fw, keys=sbj_keys,
-                                                          title="Training f1-score (weighted)")})
-            wandb.log({"val_loss": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=all_v_loss, keys=sbj_keys,
-                                                          title="Validation loss")})
-            wandb.log({"val_acc": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=all_v_acc, keys=sbj_keys,
-                                                         title="Validation accuracy")})
-            wandb.log({"val_fm": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=all_v_fm, keys=sbj_keys,
-                                                        title="Validation f1-score (macro)")})
-            wandb.log({"val_fw": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=all_v_fw, keys=sbj_keys,
-                                                        title="Validation f1-score (weighted)")})
-    elif valid_type == 'split':
+            results_row = {'v_type': 'split',
+                           'seed': seed,
+                           'sbj': -1,
+                           't_loss': t_loss,
+                           't_acc': t_acc,
+                           't_fm': t_fm,
+                           't_fw': t_fw,
+                           'v_loss': v_loss,
+                           'v_acc': v_acc,
+                           'v_fm': v_fm,
+                           'v_fw': v_fw
+                           }
+
+            results_array = results_array.append(results_row, ignore_index=True)
+
+            _, _, _, _, _, val_preds = eval_model(model, criterion, v_data, args)
+            loss_test, acc_test, fm_test, fw_test, elapsed, test_preds = eval_model(model, criterion, test_data, args)
+
+            tests_results_row = {'v_type': 'split',
+                                 'seed': seed,
+                                 'test_loss': loss_test,
+                                 'test_acc': acc_test,
+                                 'test_fm': fm_test,
+                                 'test_fw': fw_test,
+                                 }
+
+            preds_row = {'v_type': 'split',
+                         'seed': seed,
+                         'sbj': -1,
+                         'val_preds': val_preds.tolist(),
+                         'test_preds': test_preds.tolist(),
+                        }
+
+            test_results_array = test_results_array.append(tests_results_row, ignore_index=True)
+            preds_array = preds_array.append(preds_row, ignore_index=True)
+
+        elapsed = round(time.time() - start_time)
+        elapsed = str(timedelta(seconds=elapsed))
         if verbose:
-            print(paint("Applying Train-Valid Split ..."))
+            print(paint(f"Finished HAR training loop (h:m:s): {elapsed}"))
+            print(paint("--" * 50, "blue"))
 
-        val_data, train_data = dataset.train_valid_split(args['train_sbjs'], args['valid_sbjs'])
-        train_x, train_y = apply_sliding_window(train_data[:, :-1], train_data[:, -1], dataset.window, dataset.stride)
-        valid_x, valid_y = apply_sliding_window(val_data[:, :-1], val_data[:, -1], dataset.window, dataset.stride)
-        train_data = copy(dataset).alter_data(train_x[:, :, 1:], train_y, 'train')
-        val_data = copy(dataset).alter_data(valid_x[:, :, 1:], valid_y, 'val')
-
-        t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw = train_model(train_data, val_data, args, verbose)
-
-        if verbose:
-            print("Avg. Train Loss: {:.4f}".format(np.mean(t_loss)),
-                  "Train Acc: {:.4f}".format(t_acc[-1]),
-                  "Train F1 (M): {:.4f}".format(t_fm[-1]),
-                  "Train F1 (W): {:.4f}".format(t_fw[-1]),
-                  "\nValid Loss: {:.4f}".format(np.mean(v_loss)),
-                  "Valid Acc: {:.4f}".format(v_acc[-1]),
-                  "Valid F1 (M): {:.4f}".format(v_fm[-1]),
-                  "Valid F1 (W): {:.4f}".format(v_fw[-1]))
-
-        if args['wandb_logging']:
-            wandb.log(
-                {"train_loss": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[t_loss], keys=['split'],
-                                                      title="Training loss")})
-            wandb.log({"train_acc": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[t_acc], keys=['split'],
-                                                           title="Training accuracy")})
-            wandb.log({"train_fm": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[t_fm], keys=['split'],
-                                                          title="Training f1-score (macro)")})
-            wandb.log({"train_fw": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[t_fw], keys=['split'],
-                                                          title="Training f1-score (weighted)")})
-            wandb.log({"val_loss": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[v_loss], keys=['split'],
-                                                          title="Validation loss")})
-            wandb.log({"val_acc": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[v_acc], keys=['split'],
-                                                         title="Validation accuracy")})
-            wandb.log({"val_fm": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[v_fm], keys=['split'],
-                                                        title="Validation f1-score (macro)")})
-            wandb.log({"val_fw": wandb.plot.line_series(xs=list(range(args['epochs'])), ys=[v_fw], keys=['split'],
-                                                        title="Validation f1-score (weighted)")})
-
-    elapsed = round(time.time() - start_time)
-    elapsed = str(timedelta(seconds=elapsed))
-    if verbose:
-        print(paint(f"Finished HAR training loop (h:m:s): {elapsed}"))
-        print(paint("--" * 50, "blue"))
+    if args['valid_type'] == 'split':
+        return results_array, test_results_array, preds_array
+    elif args['valid_type'] == 'loso':
+        return results_array, None, preds_array
 
 
 def train_model(train_data, val_data, args, verbose=False):
@@ -176,28 +252,29 @@ def train_model(train_data, val_data, args, verbose=False):
                     'lr_decay': float, factor by which to  decay the learning rate. Default 0.9.
                     'init_weights': str, How to initialize weights. Options 'orthogonal' or None. Default 'orthogonal'.
                     'epochs': int, Total number of epochs to train the model for. Default 300.
-                    'print_freq': int, How often to print loss during each epoch if verbose=True. Default 100.
 
     :param verbose: A boolean indicating whether or not to print results.
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs
     """
     loader = DataLoader(train_data, args['batch_size_train'], True)
     loader_val = DataLoader(val_data, args['batch_size_test'], False)
+
     if args['model'] == 'deepconvlstm':
         model = DeepConvLSTM(n_channels=train_data.n_channels, n_classes=args['n_classes'], dataset=args['dataset'],
-                             weights_init=args['weights_init']).cuda()
+                             weights_init=args['weights_init'])
+    elif args['model'] == 'shallow_deepconvlstm':
+        model = DeepConvLSTM(n_channels=train_data.n_channels, n_classes=args['n_classes'], dataset=args['dataset'],
+                             weights_init=args['weights_init'], lstm_layers=1)
 
     class_weights = class_weight.compute_class_weight('balanced', classes=np.unique(train_data.target + 1),
                                                       y=train_data.target + 1)
+    criterion = init_loss(args)
+    if args['use_weights']:
+        criterion.weight = torch.FloatTensor(class_weights)
 
     if train_on_gpu:
-        criterion = init_loss(args).cuda()
-        if args['use_weights']:
-            criterion.weights = class_weights
-    else:
-        criterion = init_loss(args)
-        if args['use_weights']:
-            criterion.weights = class_weights
+        model = model.cuda()
+        criterion = criterion.cuda()
 
     optimizer = init_optimizer(model, args)
 
@@ -217,13 +294,13 @@ def train_model(train_data, val_data, args, verbose=False):
         if verbose:
             print("--" * 50)
             print("[-] Learning rate: ", optimizer.param_groups[0]["lr"])
-        train_one_epoch(model, loader, criterion, optimizer, args['print_freq'], verbose)
+        train_one_epoch(model, loader, criterion, optimizer, verbose=verbose)
         loss, acc, fm, fw = eval_one_epoch(model, loader, criterion)
         loss_val, acc_val, fm_val, fw_val = eval_one_epoch(model, loader_val, criterion)
 
         t_loss.append(loss)
         t_acc.append(acc)
-        t_fm.append(fw)
+        t_fm.append(fm)
         t_fw.append(fw)
         v_loss.append(loss_val)
         v_acc.append(acc_val)
@@ -274,7 +351,7 @@ def train_model(train_data, val_data, args, verbose=False):
         if args['lr_step'] > 0:
             scheduler.step()
 
-    return t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw
+    return t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, model, criterion
 
 
 def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose=False):

@@ -9,14 +9,14 @@
 ##################################################
 
 import torch.nn as nn
-from utils import makedir
+from dl_har_model.model.BaseModel import BaseModel
 
 
-class DeepConvLSTM(nn.Module):
+class DeepConvLSTM(BaseModel):
 
     def __init__(self, n_channels, n_classes, dataset, weights_init, experiment='default', conv_kernels=64,
                  kernel_size=5, lstm_units=128, lstm_layers=2, model='DeepConvLSTM'):
-        super(DeepConvLSTM, self).__init__()
+        super(DeepConvLSTM, self).__init__(dataset, model, experiment)
 
         self.weights_init = weights_init
 
@@ -31,14 +31,6 @@ class DeepConvLSTM(nn.Module):
         self.classifier = nn.Linear(lstm_units, n_classes)
 
         self.activation = nn.ReLU()
-
-        self.model = model
-        self.dataset = dataset
-        self.experiment = experiment
-
-        makedir(self.path_checkpoints)
-        makedir(self.path_logs)
-        makedir(self.path_visuals)
 
     def forward(self, x):
         x = x.unsqueeze(1)
@@ -58,15 +50,3 @@ class DeepConvLSTM(nn.Module):
         out = self.classifier(x)
 
         return None, out
-
-    @property
-    def path_checkpoints(self):
-        return f"./models/{self.model}/{self.dataset}/{self.experiment}/checkpoints/"
-
-    @property
-    def path_logs(self):
-        return f"./models/{self.model}/{self.dataset}/{self.experiment}/logs/"
-
-    @property
-    def path_visuals(self):
-        return f"./models/{self.model}/{self.dataset}/{self.experiment}/visuals/"

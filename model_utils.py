@@ -6,7 +6,8 @@
 # Author: Lloyd Pellatt
 # Email: lp349@sussex.ac.uk
 ##################################################
-
+import os
+import random
 import torch
 import numpy as np
 from torch import nn
@@ -173,3 +174,14 @@ def apply_sliding_window(data_x, data_y, sliding_window_size, sliding_window_ove
             output_y = np.concatenate((output_y, tmp_y), axis=0)
     output_y = [[i[-1]] for i in output_y]
     return output_x, np.array(output_y).flatten()
+
+
+def seed_torch(seed):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
