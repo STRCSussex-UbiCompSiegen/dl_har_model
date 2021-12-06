@@ -51,14 +51,14 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_loggin
 
     users = [f'User_{i}' for i in range(num_users)]
 
-    for val_user in users:
-        train_users = users
+    for i, val_user in enumerate(users):
+        train_users = users.copy()
         train_users.remove(val_user)
 
-        train_data = SensorDataset(prefix=train_users, **dataset_args)
-        val_data = SensorDataset(prefix=val_user, **dataset_args)
+        train_dataset = SensorDataset(prefix=train_users, **dataset_args)
+        val_dataset = SensorDataset(prefix=val_user, **dataset_args)
 
-        t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw = train_model(model, train_data, val_data, verbose=True,
+        t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw = train_model(model, train_dataset, val_dataset, verbose=True,
                                                                            **train_args)
 
         all_t_loss.append(t_loss)
@@ -71,7 +71,7 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_loggin
         all_v_fw.append(v_fw)
 
         if verbose:
-            print("SUBJECT: {}/{}".format(val_user + 1, num_users),
+            print("SUBJECT: {}/{}".format(i + 1, num_users),
                   "\nAvg. Train Loss: {:.4f}".format(np.mean(t_loss)),
                   "Train Acc: {:.4f}".format(t_acc[-1]),
                   "Train F1 (M): {:.4f}".format(t_fm[-1]),
@@ -278,7 +278,7 @@ if __name__ == '__main__':
         "path_processed": f"../data/opportunity",
     }
 
-    train_args = {'epochs': 10}
+    train_args = {'epochs': 1}
     num_users = 4
 
     loso_cross_validate(model, num_users, train_args, config_dataset, verbose=True)
