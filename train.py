@@ -67,30 +67,29 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_loggin
                                                                                       verbose=True, **train_args)
 
         results_row = {'v_type': 'loso',
-                               'seed': seed,
-                               'sbj': val_user,
-                               't_loss': t_loss,
-                               't_acc': t_acc,
-                               't_fm': t_fm,
-                               't_fw': t_fw,
-                               'v_loss': v_loss,
-                               'v_acc': v_acc,
-                               'v_fm': v_fm,
-                               'v_fw': v_fw
-                               }
+                       'seed': seed,
+                       'sbj': val_user,
+                       't_loss': t_loss,
+                       't_acc': t_acc,
+                       't_fm': t_fm,
+                       't_fw': t_fw,
+                       'v_loss': v_loss,
+                       'v_acc': v_acc,
+                       'v_fm': v_fm,
+                       'v_fw': v_fw
+                       }
         results_array = results_array.append(results_row, ignore_index=True)
 
         _, _, _, _, _, val_preds = eval_model(model, criterion, val_dataset)
 
         preds_row = {'v_type': 'loso',
-                             'seed': seed,
-                             'sbj': val_user,
-                             'val_preds': val_preds.tolist(),
-                             'test_preds': None,
-                             }
+                     'seed': seed,
+                     'sbj': val_user,
+                     'val_preds': val_preds.tolist(),
+                     'test_preds': None,
+                     }
 
         preds_array = preds_array.append(preds_row, ignore_index=True)
-
 
         if verbose:
             print("SUBJECT: {}/{}".format(i + 1, num_users),
@@ -104,7 +103,7 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_loggin
                   "Valid F1 (W): {:.4f}".format(v_fw[-1]))
 
     # if wandb_logging:
-        # TODO - implement wandb logging
+    # TODO - implement wandb logging
 
     elapsed = round(time.time() - start_time)
     elapsed = str(timedelta(seconds=elapsed))
