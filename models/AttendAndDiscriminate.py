@@ -8,6 +8,7 @@
 # Email: marius.bock@uni-siegen.de
 ##################################################
 
+from BaseModel import BaseModel
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -147,7 +148,7 @@ class Classifier(nn.Module):
         return self.fc(z)
 
 
-class AttendDiscriminate(nn.Module):
+class AttendDiscriminate(BaseModel):
     def __init__(
             self,
             model,
@@ -197,6 +198,8 @@ class AttendDiscriminate(nn.Module):
         )
 
         self.path_checkpoints = f"./models/{self.model}/{self.dataset}/{self.experiment}/checkpoints/"
+        self.path_logs = f"./models/{self.model}/{self.dataset}/{self.experiment}/logs/"
+        self.path_visuals = f"./models/{self.model}/{self.dataset}/{self.experiment}/visuals/"
 
     def forward(self, x):
         feature = self.fe(x)
@@ -206,12 +209,3 @@ class AttendDiscriminate(nn.Module):
         out = self.dropout(feature)
         logits = self.classifier(out)
         return z, logits
-
-    @property
-    def path_checkpoints(self):
-        return self._path_checkpoints
-
-    @path_checkpoints.setter
-    def path_checkpoints(self, path):
-        makedir(path)
-        self._path_checkpoints = path
