@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader
 from dl_har_model.eval import eval_one_epoch
 from utils import paint, AverageMeter
 from dl_har_model.model_utils import init_weights, init_loss, init_optimizer, init_scheduler
+from dl_har_dataloader.datasets import SensorDataset
 
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
@@ -266,50 +267,3 @@ def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose
         if verbose:
             if batch_idx % print_freq == 0:
                 print(f"[-] Batch {batch_idx + 1}/{len(loader)}\t Loss: {str(losses)}")
-
-
-if __name__ == '__main__':
-
-    from models.DeepConvLSTM import DeepConvLSTM
-    from dl_har_dataloader.datasets import SensorDataset
-
-    model = DeepConvLSTM(113, 18, 'opportunity').cuda()
-
-    config_dataset = {
-        "dataset": 'opportunity',
-        "window": 24,
-        "stride": 12,
-        "stride_test": 1,
-        "path_processed": f"../data/opportunity",
-    }
-
-    train_args = {'epochs': 1}
-    num_users = 4
-
-    loso_cross_validate(model, num_users, train_args, config_dataset, verbose=True)
-
-    train_data = SensorDataset(prefix='User_0', **config_dataset)
-    val_data = SensorDataset(prefix='User_1', **config_dataset)
-
-    t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw = train_model(model, train_data, val_data, verbose=True)
-
-    wandb_logging = True
-
-    if wandb_logging:
-        wandb.log(
-            {"train_loss": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=[t_loss], keys=['split'],
-                                                  title="Training loss")})
-        wandb.log({"train_acc": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=[t_acc], keys=['split'],
-                                                       title="Training accuracy")})
-        wandb.log({"train_fm": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=[t_fm], keys=['split'],
-                                                      title="Training f1-score (macro)")})
-        wandb.log({"train_fw": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=[t_fw], keys=['split'],
-                                                      title="Training f1-score (weighted)")})
-        wandb.log({"val_loss": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=[v_loss], keys=['split'],
-                                                      title="Validation loss")})
-        wandb.log({"val_acc": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=[v_acc], keys=['split'],
-                                                     title="Validation accuracy")})
-        wandb.log({"val_fm": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=[v_fm], keys=['split'],
-                                                    title="Validation f1-score (macro)")})
-        wandb.log({"val_fw": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=[v_fw], keys=['split'],
-                                                    title="Validation f1-score (weighted)")})
