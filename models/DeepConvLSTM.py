@@ -15,7 +15,7 @@ from utils import makedir
 class DeepConvLSTM(nn.Module):
 
     def __init__(self, n_channels, n_classes, dataset, experiment='default', conv_kernels=64,
-                 kernel_size=5, lstm_units=128, lstm_layers=2, model='DeepConvLSTM'):
+                 kernel_size=5, lstm_units=128, lstm_layers=2, name='DeepConvLSTM'):
         super(DeepConvLSTM, self).__init__()
 
         self.conv1 = nn.Conv2d(1, conv_kernels, (kernel_size, 1))
@@ -30,7 +30,7 @@ class DeepConvLSTM(nn.Module):
 
         self.activation = nn.ReLU()
 
-        self.model = model
+        self.name = name
         self.dataset = dataset
         self.experiment = experiment
 
@@ -61,10 +61,7 @@ class DeepConvLSTM(nn.Module):
     def path_checkpoints(self):
         return f"./models/{self.model}/{self.dataset}/{self.experiment}/checkpoints/"
 
-    @property
-    def path_logs(self):
-        return f"./models/{self.model}/{self.dataset}/{self.experiment}/logs/"
-
-    @property
-    def path_visuals(self):
-        return f"./models/{self.model}/{self.dataset}/{self.experiment}/visuals/"
+    @path_checkpoints.setter
+    def path_checkpoints(self, path):
+        makedir(path)
+        self.path_checkpoints = path

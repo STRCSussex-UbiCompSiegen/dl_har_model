@@ -52,6 +52,9 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_loggin
     users = [f'User_{i}' for i in range(num_users)]
 
     for i, val_user in enumerate(users):
+
+        model.path_checkpoints = model.path_checkpoints + f"user_{val_user}"
+
         train_users = users.copy()
         train_users.remove(val_user)
 
@@ -162,6 +165,8 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     t_loss, t_acc, t_fm, t_fw = [], [], [], []
     v_loss, v_acc, v_fm, v_fw = [], [], [], []
 
+    path_checkpoints = getattr(model, 'path_checkpoints', 'f"./models/custom_model/checkpoints')
+
     for epoch in range(epochs):
         if verbose:
             print("--" * 50)
@@ -211,13 +216,13 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
                 print(paint(f"[*] Saving checkpoint... ({metric_best}->{metric})", "blue"))
             metric_best = metric
             torch.save(
-                checkpoint, os.path.join(model.path_checkpoints, "checkpoint_best.pth")
+                checkpoint, os.path.join(path_checkpoints, "checkpoint_best.pth")
             )
 
         if epoch % 5 == 0:
             torch.save(
                 checkpoint,
-                os.path.join(model.path_checkpoints, f"checkpoint_{epoch}.pth"),
+                os.path.join(path_checkpoints, f"checkpoint_{epoch}.pth"),
             )
 
         if lr_step > 0:
