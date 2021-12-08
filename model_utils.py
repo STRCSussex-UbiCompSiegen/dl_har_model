@@ -6,7 +6,8 @@
 # Author: Lloyd Pellatt
 # Email: lp349@sussex.ac.uk
 ##################################################
-
+import os
+import random
 import torch
 import numpy as np
 from torch import nn
@@ -17,7 +18,8 @@ def init_weights(model, method):
     Weight initialization of network (initialises all LSTM, Conv2D and Linear layers according to weight_init parameter
     of network)
 
-    :param network: network of which weights are to be initialised
+    :param model: network of which weights are to be initialised
+    :param str method: Method to initialise weights
     :return: network with initialised weights
     """
     for m in model.modules():
@@ -66,6 +68,7 @@ def init_weights(model, method):
                         torch.nn.init.kaiming_normal_(param.data)
                 elif 'bias' in name:
                     param.data.fill_(0.0)
+    return model
 
 
 def init_loss(loss, smoothing, weights):
@@ -102,3 +105,14 @@ def init_scheduler(optimizer, lr_schedule, lr_step, lr_decay):
     elif lr_schedule == 'plateau':
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=lr_step, factor=lr_decay)
     return scheduler
+
+
+def seed_torch(seed):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True

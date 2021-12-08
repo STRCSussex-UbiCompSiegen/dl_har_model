@@ -9,14 +9,14 @@
 ##################################################
 
 import torch.nn as nn
-from utils import makedir
+from dl_har_model.model.BaseModel import BaseModel
 
 
-class DeepConvLSTM(nn.Module):
+class DeepConvLSTM(BaseModel):
 
     def __init__(self, n_channels, n_classes, dataset, experiment='default', conv_kernels=64,
                  kernel_size=5, lstm_units=128, lstm_layers=2, model='DeepConvLSTM'):
-        super(DeepConvLSTM, self).__init__()
+        super(DeepConvLSTM, self).__init__(dataset, model, experiment)
 
         self.conv1 = nn.Conv2d(1, conv_kernels, (kernel_size, 1))
         self.conv2 = nn.Conv2d(conv_kernels, conv_kernels, (kernel_size, 1))
@@ -29,12 +29,6 @@ class DeepConvLSTM(nn.Module):
         self.classifier = nn.Linear(lstm_units, n_classes)
 
         self.activation = nn.ReLU()
-
-        self.model = model
-        self.dataset = dataset
-        self.experiment = experiment
-
-        self.path_checkpoints = f"./models/{self.model}/{self.dataset}/{self.experiment}/checkpoints/"
 
     def forward(self, x):
         x = x.unsqueeze(1)
@@ -54,12 +48,3 @@ class DeepConvLSTM(nn.Module):
         out = self.classifier(x)
 
         return None, out
-
-    @property
-    def path_checkpoints(self):
-        return self._path_checkpoints
-
-    @path_checkpoints.setter
-    def path_checkpoints(self, path):
-        makedir(path)
-        self._path_checkpoints = path

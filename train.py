@@ -10,24 +10,23 @@
 import os
 import random
 import time
-from copy import copy
 from datetime import timedelta
 
 import numpy as np
+import pandas as pd
 import torch
-import wandb
 from sklearn.utils import class_weight
 from torch.utils.data import DataLoader
 
-from dl_har_model.eval import eval_one_epoch
+from dl_har_model.eval import eval_one_epoch, eval_model
 from utils import paint, AverageMeter
-from dl_har_model.model_utils import init_weights, init_loss, init_optimizer, init_scheduler
+from dl_har_model.model_utils import init_weights, init_loss, init_optimizer, init_scheduler, seed_torch
 from dl_har_dataloader.datasets import SensorDataset
 
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
 
-def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_logging=False, verbose=False):
+def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_logging=False, verbose=False, seed=None):
     """
     Train model for a number of epochs.
 
@@ -47,8 +46,10 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_loggin
     if verbose:
         print(paint("Applying Leave-One-Subject-Out Cross-Validation ..."))
 
-    all_t_loss, all_t_acc, all_t_fm, all_t_fw = [], [], [], []
-    all_v_loss, all_v_acc, all_v_fm, all_v_fw = [], [], [], []
+    results_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 't_loss', 't_acc', 't_fm', 't_fw', 'v_loss', 'v_acc',
+                                          'v_fm', 'v_fw'])
+
+    preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
 
     users = [f'User_{i}' for i in range(num_users)]
 
@@ -62,17 +63,34 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_loggin
         train_dataset = SensorDataset(prefix=train_users, **dataset_args)
         val_dataset = SensorDataset(prefix=val_user, **dataset_args)
 
-        t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw = train_model(model, train_dataset, val_dataset, verbose=True,
-                                                                           **train_args)
+        t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion = train_model(model, train_dataset, val_dataset,
+                                                                                      verbose=True, **train_args)
 
-        all_t_loss.append(t_loss)
-        all_t_acc.append(t_acc)
-        all_t_fm.append(t_fm)
-        all_t_fw.append(t_fw)
-        all_v_loss.append(v_loss)
-        all_v_acc.append(v_acc)
-        all_v_fm.append(v_fm)
-        all_v_fw.append(v_fw)
+        results_row = {'v_type': 'loso',
+                               'seed': seed,
+                               'sbj': val_user,
+                               't_loss': t_loss,
+                               't_acc': t_acc,
+                               't_fm': t_fm,
+                               't_fw': t_fw,
+                               'v_loss': v_loss,
+                               'v_acc': v_acc,
+                               'v_fm': v_fm,
+                               'v_fw': v_fw
+                               }
+        results_array = results_array.append(results_row, ignore_index=True)
+
+        _, _, _, _, _, val_preds = eval_model(model, criterion, val_dataset)
+
+        preds_row = {'v_type': 'loso',
+                             'seed': seed,
+                             'sbj': val_user,
+                             'val_preds': val_preds.tolist(),
+                             'test_preds': None,
+                             }
+
+        preds_array = preds_array.append(preds_row, ignore_index=True)
+
 
         if verbose:
             print("SUBJECT: {}/{}".format(i + 1, num_users),
@@ -85,29 +103,16 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_loggin
                   "Valid F1 (M): {:.4f}".format(v_fm[-1]),
                   "Valid F1 (W): {:.4f}".format(v_fw[-1]))
 
-    if wandb_logging:
-        wandb.log({"train_loss": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=all_t_loss, keys=users,
-                                                        title="Training loss")})
-        wandb.log({"train_acc": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=all_t_acc, keys=users,
-                                                       title="Training accuracy")})
-        wandb.log({"train_fm": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=all_t_fm, keys=users,
-                                                      title="Training f1-score (macro)")})
-        wandb.log({"train_fw": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=all_t_fw, keys=users,
-                                                      title="Training f1-score (weighted)")})
-        wandb.log({"val_loss": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=all_v_loss, keys=users,
-                                                      title="Validation loss")})
-        wandb.log({"val_acc": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=all_v_acc, keys=users,
-                                                     title="Validation accuracy")})
-        wandb.log({"val_fm": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=all_v_fm, keys=users,
-                                                    title="Validation f1-score (macro)")})
-        wandb.log({"val_fw": wandb.plot.line_series(xs=list(range(train_args['epochs'])), ys=all_v_fw, keys=users,
-                                                    title="Validation f1-score (weighted)")})
+    # if wandb_logging:
+        # TODO - implement wandb logging
 
     elapsed = round(time.time() - start_time)
     elapsed = str(timedelta(seconds=elapsed))
     if verbose:
         print(paint(f"Finished HAR training loop (h:m:s): {elapsed}"))
         print(paint("--" * 50, "blue"))
+
+    return results_array, preds_array
 
 
 def train_model(model, train_data, val_data, batch_size_train=256, batch_size_test=256, optimizer='Adam',
@@ -178,7 +183,7 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
 
         t_loss.append(loss)
         t_acc.append(acc)
-        t_fm.append(fw)
+        t_fm.append(fm)
         t_fw.append(fw)
         v_loss.append(loss_val)
         v_acc.append(acc_val)
@@ -229,7 +234,7 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
         if lr_step > 0:
             scheduler.step()
 
-    return t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw
+    return t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion
 
 
 def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose=False):
