@@ -11,6 +11,7 @@ import os
 import random
 import time
 from datetime import timedelta
+from glob import glob
 
 import numpy as np
 import pandas as pd
@@ -26,15 +27,82 @@ from dl_har_dataloader.datasets import SensorDataset
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
 
-def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_logging=False, verbose=False, seed=None):
+def split_validate(model, train_args, dataset_args, seeds, verbose=False):
+    train_data = SensorDataset(prefix='train', **dataset_args)
+    val_data = SensorDataset(prefix='val', **dataset_args)
+    test_data = SensorDataset(prefix='test', **dataset_args)
+    if verbose:
+        print(paint("Running HAR training loop ..."))
+    start_time = time.time()
+
+    if verbose:
+        print(paint("Applying Train-Valid-Test Split ..."))
+
+    results_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 't_loss', 't_acc', 't_fm', 't_fw', 'v_loss', 'v_acc',
+                                          'v_fm', 'v_fw'])
+    test_results_array = pd.DataFrame(columns=['v_type', 'seed', 'test_loss', 'test_acc', 'test_fm', 'test_fw'])
+
+    preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
+
+    for seed in seeds:
+        if verbose:
+            print(paint("Running with random seed set to {0}...".format(str(seed))))
+        seed_torch(seed)
+        t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion = \
+            train_model(model, train_data, val_data, seed=seed, verbose=True, **train_args)
+        _, _, _, _, _, val_preds = eval_model(model, criterion, val_data, seed=seed)
+        loss_test, acc_test, fm_test, fw_test, elapsed, test_preds = eval_model(model, criterion, test_data, seed=seed)
+
+        results_row = {'v_type': 'split',
+                       'seed': seed,
+                       'sbj': -1,
+                       't_loss': t_loss,
+                       't_acc': t_acc,
+                       't_fm': t_fm,
+                       't_fw': t_fw,
+                       'v_loss': v_loss,
+                       'v_acc': v_acc,
+                       'v_fm': v_fm,
+                       'v_fw': v_fw
+                       }
+
+        tests_results_row = {'v_type': 'split',
+                             'seed': seed,
+                             'test_loss': loss_test,
+                             'test_acc': acc_test,
+                             'test_fm': fm_test,
+                             'test_fw': fw_test,
+                             }
+
+        preds_row = {'v_type': 'split',
+                     'seed': seed,
+                     'sbj': -1,
+                     'val_preds': val_preds.tolist(),
+                     'test_preds': test_preds.tolist(),
+                     }
+
+        results_array = results_array.append(results_row, ignore_index=True)
+        test_results_array = test_results_array.append(tests_results_row, ignore_index=True)
+        preds_array = preds_array.append(preds_row, ignore_index=True)
+
+    elapsed = round(time.time() - start_time)
+    elapsed = str(timedelta(seconds=elapsed))
+    if verbose:
+        print(paint(f"Finished HAR training loop (h:m:s): {elapsed}"))
+        print(paint("--" * 50, "blue"))
+
+    return results_array, test_results_array, preds_array
+
+
+def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
     """
     Train model for a number of epochs.
 
     :param model: A pytorch model for training. Must implement forward function and allow backprop.
-    :param int num_users: The number of users in the dataset.
     :param dict train_args: A dict containing args for training. For allowed keys see train_model arguments.
     :param dict dataset_args: A dict containing args for SensorDataset class excluding the prefix. For allowed keys see
     SensorDataset.__init__ arguments.
+    :param seeds: A list of random seeds which are used during training runs.
     :param verbose: A boolean indicating whether or not to print results.
 
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs
@@ -51,59 +119,61 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_loggin
 
     preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
 
+    num_users = len(glob(os.path.join(dataset_args['path_processed'], 'User_*.npz')))
     users = [f'User_{i}' for i in range(num_users)]
 
-    for i, val_user in enumerate(users):
-
-        model.path_checkpoints = model.path_checkpoints + f"user_{val_user}"
-
-        train_users = users.copy()
-        train_users.remove(val_user)
-
-        train_dataset = SensorDataset(prefix=train_users, **dataset_args)
-        val_dataset = SensorDataset(prefix=val_user, **dataset_args)
-
-        t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion = train_model(model, train_dataset, val_dataset,
-                                                                                      verbose=True, **train_args)
-
-        results_row = {'v_type': 'loso',
-                       'seed': seed,
-                       'sbj': val_user,
-                       't_loss': t_loss,
-                       't_acc': t_acc,
-                       't_fm': t_fm,
-                       't_fw': t_fw,
-                       'v_loss': v_loss,
-                       'v_acc': v_acc,
-                       'v_fm': v_fm,
-                       'v_fw': v_fw
-                       }
-        results_array = results_array.append(results_row, ignore_index=True)
-
-        _, _, _, _, _, val_preds = eval_model(model, criterion, val_dataset)
-
-        preds_row = {'v_type': 'loso',
-                     'seed': seed,
-                     'sbj': val_user,
-                     'val_preds': val_preds.tolist(),
-                     'test_preds': None,
-                     }
-
-        preds_array = preds_array.append(preds_row, ignore_index=True)
-
+    for seed in seeds:
         if verbose:
-            print("SUBJECT: {}/{}".format(i + 1, num_users),
-                  "\nAvg. Train Loss: {:.4f}".format(np.mean(t_loss)),
-                  "Train Acc: {:.4f}".format(t_acc[-1]),
-                  "Train F1 (M): {:.4f}".format(t_fm[-1]),
-                  "Train F1 (W): {:.4f}".format(t_fw[-1]),
-                  "\nValid Loss: {:.4f}".format(np.mean(v_loss)),
-                  "Valid Acc: {:.4f}".format(v_acc[-1]),
-                  "Valid F1 (M): {:.4f}".format(v_fm[-1]),
-                  "Valid F1 (W): {:.4f}".format(v_fw[-1]))
+            print(paint("Running with random seed set to {0}...".format(str(seed))))
+        seed_torch(seed)
+        for i, val_user in enumerate(users):
 
-    # if wandb_logging:
-    # TODO - implement wandb logging
+            model.path_checkpoints = model.path_checkpoints + f"user_{val_user}"
+
+            train_users = users.copy()
+            train_users.remove(val_user)
+
+            train_dataset = SensorDataset(prefix=train_users, **dataset_args)
+            val_dataset = SensorDataset(prefix=val_user, **dataset_args)
+
+            t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion = \
+                train_model(model, train_dataset, val_dataset, seed=seed, verbose=True, **train_args)
+
+            results_row = {'v_type': 'loso',
+                           'seed': seed,
+                           'sbj': val_user,
+                           't_loss': t_loss,
+                           't_acc': t_acc,
+                           't_fm': t_fm,
+                           't_fw': t_fw,
+                           'v_loss': v_loss,
+                           'v_acc': v_acc,
+                           'v_fm': v_fm,
+                           'v_fw': v_fw
+                           }
+            results_array = results_array.append(results_row, ignore_index=True)
+
+            _, _, _, _, _, val_preds = eval_model(model, criterion, val_dataset, seed=seed)
+
+            preds_row = {'v_type': 'loso',
+                         'seed': seed,
+                         'sbj': val_user,
+                         'val_preds': val_preds.tolist(),
+                         'test_preds': None,
+                         }
+
+            preds_array = preds_array.append(preds_row, ignore_index=True)
+
+            if verbose:
+                print("SUBJECT: {}/{}".format(i + 1, num_users),
+                      "\nAvg. Train Loss: {:.4f}".format(np.mean(t_loss)),
+                      "Train Acc: {:.4f}".format(t_acc[-1]),
+                      "Train F1 (M): {:.4f}".format(t_fm[-1]),
+                      "Train F1 (W): {:.4f}".format(t_fw[-1]),
+                      "\nValid Loss: {:.4f}".format(np.mean(v_loss)),
+                      "Valid Acc: {:.4f}".format(v_acc[-1]),
+                      "Valid F1 (M): {:.4f}".format(v_fm[-1]),
+                      "Valid F1 (W): {:.4f}".format(v_fw[-1]))
 
     elapsed = round(time.time() - start_time)
     elapsed = str(timedelta(seconds=elapsed))
@@ -111,15 +181,16 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, wandb_loggin
         print(paint(f"Finished HAR training loop (h:m:s): {elapsed}"))
         print(paint("--" * 50, "blue"))
 
-    return results_array, preds_array
+    return results_array, None, preds_array
 
 
 def train_model(model, train_data, val_data, batch_size_train=256, batch_size_test=256, optimizer='Adam',
                 use_weights=True, lr=0.001, lr_schedule='step', lr_step=10, lr_decay=0.9, weights_init='orthogonal',
-                epochs=300, print_freq=100, loss='CrossEntropy', smoothing=0.0, weight_decay=0.0, verbose=False):
+                epochs=300, print_freq=100, loss='CrossEntropy', smoothing=0.0, weight_decay=0.0, seed=1, verbose=False):
     """
     Train model for a number of epochs.
 
+    :param model: A network object used for training and prediction.
     :param train_data: A SensorDataset containing the data to be used for training the model.
     :param val_data: A SensorDataset containing the data to be used for validating the model.
     :param int batch_size_train: Number of windows to process in each training batch (default 256)
@@ -140,8 +211,8 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     :param verbose: A boolean indicating whether or not to print results.
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs
     """
-    loader = DataLoader(train_data, batch_size_train, True)
-    loader_val = DataLoader(val_data, batch_size_test, False)
+    loader = DataLoader(train_data, batch_size_train, True, worker_init_fn=np.random.seed(int(seed)))
+    loader_val = DataLoader(val_data, batch_size_test, False, worker_init_fn=np.random.seed(int(seed)))
 
     if use_weights:
         class_weights = torch.from_numpy(class_weight.compute_class_weight('balanced',

@@ -23,7 +23,7 @@ from utils import AverageMeter, paint
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
 
-def eval_model(model, criterion, eval_data, batch_size=256):
+def eval_model(model, criterion, eval_data, batch_size=256, seed=1):
     """
     Evaluate trained model.
 
@@ -47,7 +47,7 @@ def eval_model(model, criterion, eval_data, batch_size=256):
 
     print(paint("Running HAR evaluation loop ..."))
 
-    loader_test = DataLoader(eval_data, batch_size, False, pin_memory=True)
+    loader_test = DataLoader(eval_data, batch_size, False, pin_memory=True, worker_init_fn=np.random.seed(int(seed)))
 
     print("[-] Loading checkpoint ...")
 
