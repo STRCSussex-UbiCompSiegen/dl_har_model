@@ -14,11 +14,9 @@ from dl_har_model.model.BaseModel import BaseModel
 
 class DeepConvLSTM(BaseModel):
 
-    def __init__(self, n_channels, n_classes, dataset, weights_init, experiment='default', conv_kernels=64,
+    def __init__(self, n_channels, n_classes, dataset, experiment='default', conv_kernels=64,
                  kernel_size=5, lstm_units=128, lstm_layers=2, model='DeepConvLSTM'):
         super(DeepConvLSTM, self).__init__(dataset, model, experiment)
-
-        self.weights_init = weights_init
 
         self.conv1 = nn.Conv2d(1, conv_kernels, (kernel_size, 1))
         self.conv2 = nn.Conv2d(conv_kernels, conv_kernels, (kernel_size, 1))
