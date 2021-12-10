@@ -122,13 +122,15 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
     num_users = len(glob(os.path.join(dataset_args['path_processed'], 'User_*.npz')))
     users = [f'User_{i}' for i in range(num_users)]
 
+    base_path_checkpoints = model.path_checkpoints
+
     for seed in seeds:
         if verbose:
             print(paint("Running with random seed set to {0}...".format(str(seed))))
         seed_torch(seed)
         for i, val_user in enumerate(users):
 
-            model.path_checkpoints = model.path_checkpoints + f"user_{val_user}"
+            model.path_checkpoints = base_path_checkpoints + f"/{seed}/" + val_user
 
             train_users = users.copy()
             train_users.remove(val_user)
@@ -241,7 +243,7 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     t_loss, t_acc, t_fm, t_fw = [], [], [], []
     v_loss, v_acc, v_fm, v_fw = [], [], [], []
 
-    path_checkpoints = getattr(model, 'path_checkpoints', 'f"./models/custom_model/checkpoints')
+    path_checkpoints = getattr(model, 'path_checkpoints', './models/custom_model/checkpoints')
 
     for epoch in range(epochs):
         if verbose:
