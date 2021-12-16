@@ -8,7 +8,7 @@
 # Email: marius.bock@uni-siegen.de
 ##################################################
 
-from BaseModel import BaseModel
+from dl_har_model.models.BaseModel import BaseModel
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -148,30 +148,29 @@ class Classifier(nn.Module):
         return self.fc(z)
 
 
-class AttendDiscriminate(BaseModel):
+class AttendAndDiscriminate(BaseModel):
     def __init__(
             self,
-            model,
-            dataset,
             input_dim,
-            hidden_dim,
-            filter_num,
-            filter_size,
-            enc_num_layers,
-            enc_is_bidirectional,
-            dropout,
-            dropout_rnn,
-            dropout_cls,
-            activation,
-            sa_div,
             num_class,
-            train_mode,
-            experiment,
+            dataset,
+            model='AttendAndDiscriminate',
+            hidden_dim=128,
+            filter_num=64,
+            filter_size=5,
+            enc_num_layers=2,
+            enc_is_bidirectional=False,
+            dropout=0.5,
+            dropout_rnn=0.5,
+            dropout_cls=0.5,
+            activation='ReLU',
+            sa_div=1,
+            experiment='Default',
             isdeeper=False,
     ):
-        super(AttendDiscriminate, self).__init__()
+        super(AttendAndDiscriminate, self).__init__(dataset, model)
 
-        self.experiment = f"train_{experiment}" if train_mode else experiment
+        self.experiment = experiment
         self.model = model
         self.dataset = dataset
         self.hidden_dim = hidden_dim
@@ -196,10 +195,6 @@ class AttendDiscriminate(BaseModel):
         self.register_buffer(
             "centers", (torch.randn(num_class, self.hidden_dim).cuda())
         )
-
-        self.path_checkpoints = f"./models/{self.model}/{self.dataset}/{self.experiment}/checkpoints/"
-        self.path_logs = f"./models/{self.model}/{self.dataset}/{self.experiment}/logs/"
-        self.path_visuals = f"./models/{self.model}/{self.dataset}/{self.experiment}/visuals/"
 
     def forward(self, x):
         feature = self.fe(x)

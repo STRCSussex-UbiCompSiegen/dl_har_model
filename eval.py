@@ -23,7 +23,7 @@ from utils import AverageMeter, paint
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
 
-def eval_model(model, criterion, eval_data, batch_size=256, seed=1):
+def eval_model(model, eval_data,  criterion=None,batch_size=256, seed=1):
     """
     Evaluate trained model.
 
@@ -44,6 +44,9 @@ def eval_model(model, criterion, eval_data, batch_size=256, seed=1):
 
     :return: loss, accuracy, f1 weighted and macro for evaluation data; if return_results, also predictions
     """
+
+    if criterion is None:
+        criterion = nn.CrossEntropyLoss()
 
     print(paint("Running HAR evaluation loop ..."))
 
