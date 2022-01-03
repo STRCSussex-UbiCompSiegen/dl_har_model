@@ -9,7 +9,7 @@
 ##################################################
 
 import torch.nn as nn
-from dl_har_model.model.BaseModel import BaseModel
+from dl_har_model.models.BaseModel import BaseModel
 
 
 class DeepConvLSTM(BaseModel):
