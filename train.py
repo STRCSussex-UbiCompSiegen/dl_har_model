@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader
 from dl_har_model.eval import eval_one_epoch, eval_model
 from utils import paint, AverageMeter
 from dl_har_model.model_utils import init_weights, init_loss, init_optimizer, init_scheduler, seed_torch
+from dl_har_model.train_utils import compute_center_loss, get_center_delta, mixup_data, MixUpLoss
 from dl_har_dataloader.datasets import SensorDataset
 
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
@@ -309,7 +310,8 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     return t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion
 
 
-def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose=False):
+def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, centerloss=False, lr_cent=1e-4, beta=0.5,
+                    mixup=False, alpha=0.5, verbose=False):
     """
     Train model for a one of epoch.
 
@@ -317,7 +319,12 @@ def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose
     :param loader: A DataLoader object containing the data to be used for training the model.
     :param criterion: The loss object.
     :param optimizer: The optimizer object.
-    :param print_freq: int, How often to print loss during each epoch if verbose=True. Default 100.
+    :param int print_freq: How often to print loss during each epoch if verbose=True. Default 100.
+    :param bool centerloss: Enable loss function augmentation with centerloss.
+    :param float lr_cent: Learning rate to for the centerloss.
+    :param float beta: Weighting for the centerloss.
+    :param bool mixup: Enable data augmentation with MixUp.
+    :param float alpha: Mixup scaling factor.
 
     :param verbose: A boolean indicating whether or not to print results.
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs
@@ -332,8 +339,25 @@ def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose
             target = target.view(-1).cuda()
         else:
             target = target.view(-1)
+
+        if centerloss:
+            centers = model.centers
+
+        if mixup:
+            data, y_a_y_b_lam = mixup_data(data, target, alpha)
+
         z, logits = model(data)
-        loss = criterion(logits, target)
+
+        if mixup:
+            criterion = MixUpLoss(criterion)
+            loss = criterion(logits, y_a_y_b_lam)
+        else:
+            loss = criterion(logits, target)
+
+        if centerloss:
+            center_loss = compute_center_loss(z, centers, target)
+            loss = loss + beta * center_loss
+
         losses.update(loss.item(), data.shape[0])
 
         optimizer.zero_grad()
@@ -341,6 +365,13 @@ def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose
         loss.backward()
         optimizer.step()
 
+        if centerloss:
+            center_deltas = get_center_delta(z.data.float(), centers.float(), target, lr_cent, train_on_gpu)
+            model.centers = centers - center_deltas
+
         if verbose:
             if batch_idx % print_freq == 0:
                 print(f"[-] Batch {batch_idx + 1}/{len(loader)}\t Loss: {str(losses)}")
+
+        if mixup:
+            criterion = criterion.get_old()
