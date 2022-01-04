@@ -189,7 +189,8 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
 
 def train_model(model, train_data, val_data, batch_size_train=256, batch_size_test=256, optimizer='Adam',
                 use_weights=True, lr=0.001, lr_schedule='step', lr_step=10, lr_decay=0.9, weights_init='orthogonal',
-                epochs=300, print_freq=100, loss='CrossEntropy', smoothing=0.0, weight_decay=0.0, seed=1, verbose=False):
+                epochs=300, print_freq=100, loss='CrossEntropy', smoothing=0.0, weight_decay=0.0, seed=1,
+                centerloss=False, lr_cent=1e-4, beta=0.5, mixup=False, alpha=0.5, verbose=False):
     """
     Train model for a number of epochs.
 
@@ -210,6 +211,12 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     :param str loss: Loss function to use. Default 'Adam'.
     :param float smoothing: Amount of label smoothing to apply. Default 0.0 (no smoothing).
     :param float weight_decay: Amount of weight decay applied per batch. Default 0.0 (no decay).
+    :param bool centerloss: Whether to augment the loss function with centerloss. In this case the model must implement
+    centers. Default False.
+    :param float lr_cent: Learning rate for centerloss.
+    :param float beta: Weighting for centerloss.
+    :param bool mixup: Whether to implement data augmentation with mixup.
+    :param float alpha: Controls the distribution of labels for mixup.
 
     :param verbose: A boolean indicating whether or not to print results.
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs
@@ -250,7 +257,8 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
         if verbose:
             print("--" * 50)
             print("[-] Learning rate: ", optimizer.param_groups[0]["lr"])
-        train_one_epoch(model, loader, criterion, optimizer, print_freq, verbose)
+        train_one_epoch(model, loader, criterion, optimizer, print_freq, centerloss, lr_cent, beta,
+                    mixup, alpha, verbose)
         loss, acc, fm, fw = eval_one_epoch(model, loader, criterion)
         loss_val, acc_val, fm_val, fw_val = eval_one_epoch(model, loader_val, criterion)
 
@@ -310,8 +318,8 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     return t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion
 
 
-def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, centerloss=False, lr_cent=1e-4, beta=0.5,
-                    mixup=False, alpha=0.5, verbose=False):
+def train_one_epoch(model, loader, criterion, optimizer, print_freq, centerloss, lr_cent, beta,
+                    mixup, alpha, verbose):
     """
     Train model for a one of epoch.
 
@@ -341,6 +349,7 @@ def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, centerl
             target = target.view(-1)
 
         if centerloss:
+            assert hasattr(model, 'centers'), "Model must implement class center tracking to enable centerloss."
             centers = model.centers
 
         if mixup:
