@@ -28,10 +28,25 @@ from dl_har_dataloader.datasets import SensorDataset
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
 
-def split_validate(model, train_args, dataset_args, seeds, verbose=False):
+def split_validate(model, train_args, dataset_args, seeds=None, verbose=False):
+    """
+    Train model for a number of epochs using split validation.
+
+    :param model: A pytorch model for training. Must implement forward function and allow backprop.
+    :param dict train_args: A dict containing args for training. For allowed keys see train_model arguments.
+    :param dict dataset_args: A dict containing args for SensorDataset class excluding the prefix. For allowed keys see
+    SensorDataset.__init__ arguments.
+    :param verbose: A boolean indicating whether to print results.
+    :param list seeds: A dict containing all random seeds used for training.
+
+    :return: training and validation losses, accuracies, f1 weighted and macro across epochs and raw predictions
+    """
+
     train_data = SensorDataset(prefix='train', **dataset_args)
     val_data = SensorDataset(prefix='val', **dataset_args)
     test_data = SensorDataset(prefix='test', **dataset_args)
+    if seeds is None:
+        seeds = [1]
     if verbose:
         print(paint("Running HAR training loop ..."))
     start_time = time.time()
@@ -106,7 +121,7 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
     :param seeds: A list of random seeds which are used during training runs.
     :param verbose: A boolean indicating whether or not to print results.
 
-    :return: training and validation losses, accuracies, f1 weighted and macro across epochs
+    :return: training and validation losses, accuracies, f1 weighted and macro across epochs and raw predictions
     """
     if verbose:
         print(paint("Running HAR training loop ..."))
@@ -218,9 +233,11 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     :param bool mixup: Whether to implement data augmentation with mixup.
     :param float alpha: Controls the distribution of labels for mixup.
 
-    :param verbose: A boolean indicating whether or not to print results.
+    :param bool verbose: A boolean indicating whether to print results.
+    :param int seed: Random seed which is to be used.
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs
     """
+
     loader = DataLoader(train_data, batch_size_train, True, worker_init_fn=np.random.seed(int(seed)))
     loader_val = DataLoader(val_data, batch_size_test, False, worker_init_fn=np.random.seed(int(seed)))
 
@@ -296,7 +313,6 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
             "numpy_rnd_state": np.random.get_state(),
             "torch_rnd_state": torch.get_rng_state(),
         }
-
         metric = fm_val
         if metric >= metric_best:
             if verbose:
@@ -309,7 +325,7 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
         if epoch % 5 == 0:
             torch.save(
                 checkpoint,
-                os.path.join(path_checkpoints, f"checkpoint_{epoch}.pth"),
+                os.path.join(path_checkpoints, f"checkpoint_{epoch}.pth")
             )
 
         if lr_step > 0:

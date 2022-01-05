@@ -23,24 +23,15 @@ from utils import AverageMeter, paint
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
 
-def eval_model(model, eval_data,  criterion=None,batch_size=256, seed=1):
+def eval_model(model, eval_data, criterion=None, batch_size=256, seed=1):
     """
     Evaluate trained model.
 
     :param model: A trained model which is to be evaluated.
     :param eval_data: A SensorDataset containing the data to be used for evaluating the model.
-    :param args: A dict containing config options for the training.
-    Required keys:
-                    'batch_size_train': int, number of windows to process in each training batch (default 256)
-                    'batch_size_test': int, number of windows to process in each testing batch (default 256)
-                    'optimizer': str, optimizer function to use. Options: 'Adam' or 'RMSProp'. Default 'Adam'.
-                    'use_weights': bool, whether to use weighted or non-weighted CE-loss. Default 'True'.
-                    'lr': float, maximum initial learning rate. Default 0.001.
-                    'lr_schedule': str, type of learning rate schedule to use. Default 'step'
-                    'lr_step': int, interval at which to decrease the learning rate. Default 10.
-                    'lr_decay': float, factor by which to  decay the learning rate. Default 0.9.
-                    'init_weights': str, How to initialize weights. Options 'orthogonal' or None. Default 'orthogonal'.
-                    'epochs': int, Total number of epochs to train the model for. Default 300.
+    :param criterion: Citerion object which was used during training of model.
+    :param batch_size: Batch size to use during evaluation.
+    :param seed: Random seed which is employed.
 
     :return: loss, accuracy, f1 weighted and macro for evaluation data; if return_results, also predictions
     """
@@ -84,6 +75,7 @@ def eval_one_epoch(model, loader, criterion, return_preds=False):
     :param loader: A DataLoader object containing the data to be used for evaluating the model.
     :param criterion: The loss object.
     :param return_preds: Boolean indicating whether to return predictions or not.
+
     :return: loss, accuracy, f1 weighted and macro for evaluation data; if return_preds, also predictions
     """
 
