@@ -8,14 +8,14 @@
 # Email: marius.bock@uni-siegen.de
 ##################################################
 
-from BaseModel import BaseModel
+from dl_har_model.models.BaseModel import BaseModel
 import torch
 import torch.nn.functional as F
 from torch import nn
 from utils import makedir, paint
 
 
-def conv1d(ni: int, no: int, ks: int = 1, stride: int = 1, padding: int = 0, bias: bool = False):
+def conv1d(ni: int, no: int, ks: int = 1, stride: int = 1, padding: int = 0, bias: bool = True):
     """
     Create and initialize a `nn.Conv1d` layer with spectral normalization.
     """
@@ -85,7 +85,6 @@ class FeatureExtractor(nn.Module):
             dropout_rnn,
             activation,
             sa_div,
-            isdeeper=False,
     ):
         super(FeatureExtractor, self).__init__()
 
@@ -93,11 +92,7 @@ class FeatureExtractor(nn.Module):
         self.conv2 = nn.Conv2d(filter_num, filter_num, (filter_size, 1))
         self.conv3 = nn.Conv2d(filter_num, filter_num, (filter_size, 1))
         self.conv4 = nn.Conv2d(filter_num, filter_num, (filter_size, 1))
-        if isdeeper:
-            self.conv5 = nn.Conv2d(filter_num, filter_num, (filter_size, 1))
-            self.conv6 = nn.Conv2d(filter_num, filter_num, (filter_size, 1))
-            self.conv7 = nn.Conv2d(filter_num, filter_num, (filter_size, 1))
-            self.conv8 = nn.Conv2d(filter_num, filter_num, (filter_size, 1))
+
         self.activation = nn.ReLU() if activation == "ReLU" else nn.Tanh()
 
         self.dropout = nn.Dropout(dropout)
@@ -112,7 +107,6 @@ class FeatureExtractor(nn.Module):
         self.ta = TemporalAttention(hidden_dim)
         self.sa = SelfAttention(filter_num, sa_div)
 
-        self.isdeeper = isdeeper
 
     def forward(self, x):
         x = x.unsqueeze(1)
@@ -120,11 +114,7 @@ class FeatureExtractor(nn.Module):
         x = self.activation(self.conv2(x))
         x = self.activation(self.conv3(x))
         x = self.activation(self.conv4(x))
-        if self.isdeeper:
-            x = self.activation(self.conv5(x))
-            x = self.activation(self.conv6(x))
-            x = self.activation(self.conv7(x))
-            x = self.activation(self.conv8(x))
+
         # apply self-attention on each temporal dimension (along sensor and feature dimensions)
         refined = torch.cat(
             [self.sa(torch.unsqueeze(x[:, :, t, :], dim=3)) for t in range(x.shape[2])],
@@ -148,30 +138,29 @@ class Classifier(nn.Module):
         return self.fc(z)
 
 
-class AttendDiscriminate(BaseModel):
+class AttendAndDiscriminate(BaseModel):
     def __init__(
             self,
-            model,
-            dataset,
             input_dim,
-            hidden_dim,
-            filter_num,
-            filter_size,
-            enc_num_layers,
-            enc_is_bidirectional,
-            dropout,
-            dropout_rnn,
-            dropout_cls,
-            activation,
-            sa_div,
             num_class,
-            train_mode,
-            experiment,
+            dataset,
+            model='AttendAndDiscriminate',
+            hidden_dim=128,
+            filter_num=64,
+            filter_size=5,
+            enc_num_layers=2,
+            enc_is_bidirectional=False,
+            dropout=0.5,
+            dropout_rnn=0.5,
+            dropout_cls=0.5,
+            activation='ReLU',
+            sa_div=1,
+            experiment='Default',
             isdeeper=False,
     ):
-        super(AttendDiscriminate, self).__init__()
+        super(AttendAndDiscriminate, self).__init__(dataset, model)
 
-        self.experiment = f"train_{experiment}" if train_mode else experiment
+        self.experiment = experiment
         self.model = model
         self.dataset = dataset
         self.hidden_dim = hidden_dim
@@ -188,18 +177,13 @@ class AttendDiscriminate(BaseModel):
             dropout_rnn,
             activation,
             sa_div,
-            isdeeper,
         )
 
         self.dropout = nn.Dropout(dropout_cls)
         self.classifier = Classifier(hidden_dim, num_class)
         self.register_buffer(
-            "centers", (torch.randn(num_class, self.hidden_dim).cuda())
+            "centers", (torch.randn(num_class, self.hidden_dim))
         )
-
-        self.path_checkpoints = f"./models/{self.model}/{self.dataset}/{self.experiment}/checkpoints/"
-        self.path_logs = f"./models/{self.model}/{self.dataset}/{self.experiment}/logs/"
-        self.path_visuals = f"./models/{self.model}/{self.dataset}/{self.experiment}/visuals/"
 
     def forward(self, x):
         feature = self.fe(x)
