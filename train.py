@@ -250,9 +250,9 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
         class_weights = None
 
     if train_on_gpu:
-        criterion = init_loss(loss, smoothing, class_weights.cuda()).cuda()
+        criterion = init_loss(loss, smoothing, class_weights, train_on_gpu).cuda()
     else:
-        criterion = init_loss(loss, smoothing, class_weights)
+        criterion = init_loss(loss, smoothing, class_weights, train_on_gpu)
 
     optimizer = init_optimizer(model, optimizer, lr, weight_decay)
 

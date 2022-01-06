@@ -71,12 +71,14 @@ def init_weights(model, method):
     return model
 
 
-def init_loss(loss, smoothing, weights):
+def init_loss(loss, smoothing, weights, train_on_gpu):
     """
     Initialises an loss object for a given network.
 
     :return: loss object
     """
+    if weights is not None and train_on_gpu:
+        weights = weights.cuda()
     if loss == 'CrossEntropy' or loss == 'cross-entropy' or loss == 'ce':
         criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=smoothing)
     return criterion
@@ -101,7 +103,7 @@ def init_optimizer(network, optimizer, lr, weight_decay):
 
 def init_scheduler(optimizer, lr_schedule, lr_step, lr_decay):
     if lr_schedule == 'step':
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_step, lr_decay)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_step, gamma=lr_decay)
     elif lr_schedule == 'plateau':
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=lr_step, factor=lr_decay)
     return scheduler
