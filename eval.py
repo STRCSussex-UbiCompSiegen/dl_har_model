@@ -41,7 +41,7 @@ def eval_model(model, eval_data, criterion=None, batch_size=256, seed=1):
 
     print(paint("Running HAR evaluation loop ..."))
 
-    loader_test = DataLoader(eval_data, batch_size, False, pin_memory=True, worker_init_fn=np.random.seed(seed))
+    loader_test = DataLoader(eval_data, batch_size, False, pin_memory=True, worker_init_fn=np.random.seed(int(seed)))
 
     print("[-] Loading checkpoint ...")
 

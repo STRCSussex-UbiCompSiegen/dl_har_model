@@ -11,6 +11,7 @@ import os
 import random
 import time
 from datetime import timedelta
+from glob import glob
 
 import numpy as np
 import pandas as pd
@@ -21,12 +22,13 @@ from torch.utils.data import DataLoader
 from dl_har_model.eval import eval_one_epoch, eval_model
 from utils import paint, AverageMeter
 from dl_har_model.model_utils import init_weights, init_loss, init_optimizer, init_scheduler, seed_torch
+from dl_har_model.train_utils import compute_center_loss, get_center_delta, mixup_data, MixUpLoss
 from dl_har_dataloader.datasets import SensorDataset
 
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
 
-def split_validate(model, train_args, dataset_args, verbose=False, seeds=None):
+def split_validate(model, train_args, dataset_args, seeds=None, verbose=False):
     """
     Train model for a number of epochs using split validation.
 
@@ -39,6 +41,10 @@ def split_validate(model, train_args, dataset_args, verbose=False, seeds=None):
 
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs and raw predictions
     """
+
+    train_data = SensorDataset(prefix='train', **dataset_args)
+    val_data = SensorDataset(prefix='val', **dataset_args)
+    test_data = SensorDataset(prefix='test', **dataset_args)
     if seeds is None:
         seeds = [1]
     if verbose:
@@ -46,25 +52,22 @@ def split_validate(model, train_args, dataset_args, verbose=False, seeds=None):
     start_time = time.time()
 
     if verbose:
-        print(paint("Applying Split-Validation ..."))
+        print(paint("Applying Train-Valid-Test Split ..."))
 
     results_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 't_loss', 't_acc', 't_fm', 't_fw', 'v_loss', 'v_acc',
                                           'v_fm', 'v_fw'])
-    test_array = pd.DataFrame(columns=['v_type', 'seed', 'test_loss', 'test_acc', 'test_fm', 'test_fw'])
+    test_results_array = pd.DataFrame(columns=['v_type', 'seed', 'test_loss', 'test_acc', 'test_fm', 'test_fw'])
+
     preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
 
-    orig_path = model.path_checkpoints
-
-    train_dataset = SensorDataset(prefix='train', **dataset_args)
-    val_dataset = SensorDataset(prefix='val', **dataset_args)
-    test_dataset = SensorDataset(prefix='test', **dataset_args)
-
     for seed in seeds:
-        model.path_checkpoints = orig_path + f"/seed_{seed}"
+        if verbose:
+            print(paint("Running with random seed set to {0}...".format(str(seed))))
         seed_torch(seed)
-
         t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion = \
-            train_model(model, train_dataset, val_dataset, verbose=True, seed=seed, **train_args)
+            train_model(model, train_data, val_data, seed=seed, verbose=True, **train_args)
+        _, _, _, _, _, val_preds = eval_model(model, criterion, val_data, seed=seed)
+        loss_test, acc_test, fm_test, fw_test, elapsed, test_preds = eval_model(model, criterion, test_data, seed=seed)
 
         results_row = {'v_type': 'split',
                        'seed': seed,
@@ -79,12 +82,13 @@ def split_validate(model, train_args, dataset_args, verbose=False, seeds=None):
                        'v_fw': v_fw
                        }
 
-        results_array = results_array.append(results_row, ignore_index=True)
-
-        _, _, _, _, _, val_preds = \
-            eval_model(model, val_dataset, criterion, train_args['batch_size_test'], seed)
-        test_loss, test_acc, test_fm, test_fw, _, test_preds = \
-            eval_model(model, test_dataset, criterion, train_args['batch_size_test'], seed)
+        tests_results_row = {'v_type': 'split',
+                             'seed': seed,
+                             'test_loss': loss_test,
+                             'test_acc': acc_test,
+                             'test_fm': fm_test,
+                             'test_fw': fw_test,
+                             }
 
         preds_row = {'v_type': 'split',
                      'seed': seed,
@@ -93,26 +97,9 @@ def split_validate(model, train_args, dataset_args, verbose=False, seeds=None):
                      'test_preds': test_preds.tolist(),
                      }
 
-        test_row = {'v_type': 'split',
-                    'seed': seed,
-                    'test_loss': test_loss,
-                    'test_acc': test_acc,
-                    'test_fm': test_fm,
-                    'test_fw': test_fw
-                    }
-
+        results_array = results_array.append(results_row, ignore_index=True)
+        test_results_array = test_results_array.append(tests_results_row, ignore_index=True)
         preds_array = preds_array.append(preds_row, ignore_index=True)
-        test_array = test_array.append(test_row, ignore_index=True)
-
-        if verbose:
-            print("Avg. Train Loss: {:.4f}".format(np.mean(t_loss)),
-                  "Train Acc: {:.4f}".format(t_acc[-1]),
-                  "Train F1 (M): {:.4f}".format(t_fm[-1]),
-                  "Train F1 (W): {:.4f}".format(t_fw[-1]),
-                  "\nValid Loss: {:.4f}".format(np.mean(v_loss)),
-                  "Valid Acc: {:.4f}".format(v_acc[-1]),
-                  "Valid F1 (M): {:.4f}".format(v_fm[-1]),
-                  "Valid F1 (W): {:.4f}".format(v_fw[-1]))
 
     elapsed = round(time.time() - start_time)
     elapsed = str(timedelta(seconds=elapsed))
@@ -120,20 +107,19 @@ def split_validate(model, train_args, dataset_args, verbose=False, seeds=None):
         print(paint(f"Finished HAR training loop (h:m:s): {elapsed}"))
         print(paint("--" * 50, "blue"))
 
-    return results_array, test_array, preds_array
+    return results_array, test_results_array, preds_array
 
 
-def loso_cross_validate(model, num_users, train_args, dataset_args, verbose=False, seeds=None):
+def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
     """
-    Train model for a number of epochs using LOSO cross-validation.
+    Train model for a number of epochs.
 
     :param model: A pytorch model for training. Must implement forward function and allow backprop.
     :param dict train_args: A dict containing args for training. For allowed keys see train_model arguments.
     :param dict dataset_args: A dict containing args for SensorDataset class excluding the prefix. For allowed keys see
     SensorDataset.__init__ arguments.
-    :param int num_users: The number of users in the dataset.
+    :param seeds: A list of random seeds which are used during training runs.
     :param verbose: A boolean indicating whether or not to print results.
-    :param list seeds: A dict containing all random seeds used for training.
 
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs and raw predictions
     """
@@ -149,12 +135,18 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, verbose=Fals
 
     preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
 
+    num_users = len(glob(os.path.join(dataset_args['path_processed'], 'User_*.npz')))
     users = [f'User_{i}' for i in range(num_users)]
-    orig_path = model.path_checkpoints
+
+    base_path_checkpoints = model.path_checkpoints
+
     for seed in seeds:
+        if verbose:
+            print(paint("Running with random seed set to {0}...".format(str(seed))))
         seed_torch(seed)
         for i, val_user in enumerate(users):
-            model.path_checkpoints = orig_path + f"/seed_{seed}/user_{val_user}"
+
+            model.path_checkpoints = base_path_checkpoints + f"/{seed}/" + val_user
 
             train_users = users.copy()
             train_users.remove(val_user)
@@ -163,7 +155,7 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, verbose=Fals
             val_dataset = SensorDataset(prefix=val_user, **dataset_args)
 
             t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion = \
-                train_model(model, train_dataset, val_dataset, verbose=True, seed=seed, **train_args)
+                train_model(model, train_dataset, val_dataset, seed=seed, verbose=True, **train_args)
 
             results_row = {'v_type': 'loso',
                            'seed': seed,
@@ -179,8 +171,7 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, verbose=Fals
                            }
             results_array = results_array.append(results_row, ignore_index=True)
 
-            _, _, _, _, _, val_preds = \
-                eval_model(model, val_dataset, criterion, train_args['batch_size_test'], seed)
+            _, _, _, _, _, val_preds = eval_model(model, criterion, val_dataset, seed=seed)
 
             preds_row = {'v_type': 'loso',
                          'seed': seed,
@@ -213,11 +204,12 @@ def loso_cross_validate(model, num_users, train_args, dataset_args, verbose=Fals
 
 def train_model(model, train_data, val_data, batch_size_train=256, batch_size_test=256, optimizer='Adam',
                 use_weights=True, lr=0.001, lr_schedule='step', lr_step=10, lr_decay=0.9, weights_init='orthogonal',
-                epochs=300, print_freq=100, loss='CrossEntropy', smoothing=0.0, weight_decay=0.0, verbose=False,
-                seed=1):
+                epochs=300, print_freq=100, loss='CrossEntropy', smoothing=0.0, weight_decay=0.0, seed=1,
+                centerloss=False, lr_cent=1e-4, beta=0.5, mixup=False, alpha=0.5, verbose=False):
     """
     Train model for a number of epochs.
 
+    :param model: A network object used for training and prediction.
     :param train_data: A SensorDataset containing the data to be used for training the model.
     :param val_data: A SensorDataset containing the data to be used for validating the model.
     :param int batch_size_train: Number of windows to process in each training batch (default 256)
@@ -234,13 +226,20 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     :param str loss: Loss function to use. Default 'Adam'.
     :param float smoothing: Amount of label smoothing to apply. Default 0.0 (no smoothing).
     :param float weight_decay: Amount of weight decay applied per batch. Default 0.0 (no decay).
+    :param bool centerloss: Whether to augment the loss function with centerloss. In this case the model must implement
+    centers. Default False.
+    :param float lr_cent: Learning rate for centerloss.
+    :param float beta: Weighting for centerloss.
+    :param bool mixup: Whether to implement data augmentation with mixup.
+    :param float alpha: Controls the distribution of labels for mixup.
 
     :param bool verbose: A boolean indicating whether to print results.
     :param int seed: Random seed which is to be used.
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs
     """
-    loader = DataLoader(train_data, batch_size_train, True, worker_init_fn=np.random.seed(seed))
-    loader_val = DataLoader(val_data, batch_size_test, False, worker_init_fn=np.random.seed(seed))
+
+    loader = DataLoader(train_data, batch_size_train, True, worker_init_fn=np.random.seed(int(seed)))
+    loader_val = DataLoader(val_data, batch_size_test, False, worker_init_fn=np.random.seed(int(seed)))
 
     if use_weights:
         class_weights = torch.from_numpy(class_weight.compute_class_weight('balanced',
@@ -269,13 +268,14 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     t_loss, t_acc, t_fm, t_fw = [], [], [], []
     v_loss, v_acc, v_fm, v_fw = [], [], [], []
 
-    path_checkpoints = getattr(model, 'path_checkpoints', 'f"./models/custom_model/checkpoints')
+    path_checkpoints = getattr(model, 'path_checkpoints', './models/custom_model/checkpoints')
 
     for epoch in range(epochs):
         if verbose:
             print("--" * 50)
             print("[-] Learning rate: ", optimizer.param_groups[0]["lr"])
-        train_one_epoch(model, loader, criterion, optimizer, print_freq, verbose)
+        train_one_epoch(model, loader, criterion, optimizer, print_freq, centerloss, lr_cent, beta,
+                    mixup, alpha, verbose)
         loss, acc, fm, fw = eval_one_epoch(model, loader, criterion)
         loss_val, acc_val, fm_val, fw_val = eval_one_epoch(model, loader_val, criterion)
 
@@ -334,7 +334,8 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     return t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion
 
 
-def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose=False):
+def train_one_epoch(model, loader, criterion, optimizer, print_freq, centerloss, lr_cent, beta,
+                    mixup, alpha, verbose):
     """
     Train model for a one of epoch.
 
@@ -342,7 +343,12 @@ def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose
     :param loader: A DataLoader object containing the data to be used for training the model.
     :param criterion: The loss object.
     :param optimizer: The optimizer object.
-    :param print_freq: int, How often to print loss during each epoch if verbose=True. Default 100.
+    :param int print_freq: How often to print loss during each epoch if verbose=True. Default 100.
+    :param bool centerloss: Enable loss function augmentation with centerloss.
+    :param float lr_cent: Learning rate to for the centerloss.
+    :param float beta: Weighting for the centerloss.
+    :param bool mixup: Enable data augmentation with MixUp.
+    :param float alpha: Mixup scaling factor.
 
     :param verbose: A boolean indicating whether or not to print results.
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs
@@ -357,8 +363,26 @@ def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose
             target = target.view(-1).cuda()
         else:
             target = target.view(-1)
+
+        if centerloss:
+            assert hasattr(model, 'centers'), "Model must implement class center tracking to enable centerloss."
+            centers = model.centers
+
+        if mixup:
+            data, y_a_y_b_lam = mixup_data(data, target, alpha)
+
         z, logits = model(data)
-        loss = criterion(logits, target)
+
+        if mixup:
+            criterion = MixUpLoss(criterion)
+            loss = criterion(logits, y_a_y_b_lam)
+        else:
+            loss = criterion(logits, target)
+
+        if centerloss:
+            center_loss = compute_center_loss(z, centers, target)
+            loss = loss + beta * center_loss
+
         losses.update(loss.item(), data.shape[0])
 
         optimizer.zero_grad()
@@ -366,6 +390,13 @@ def train_one_epoch(model, loader, criterion, optimizer, print_freq=100, verbose
         loss.backward()
         optimizer.step()
 
+        if centerloss:
+            center_deltas = get_center_delta(z.data.float(), centers.float(), target, lr_cent, train_on_gpu)
+            model.centers = centers - center_deltas
+
         if verbose:
             if batch_idx % print_freq == 0:
                 print(f"[-] Batch {batch_idx + 1}/{len(loader)}\t Loss: {str(losses)}")
+
+        if mixup:
+            criterion = criterion.get_old()

@@ -20,9 +20,9 @@ class BaseModel(nn.Module):
         self.dataset = dataset
         self.experiment = experiment
 
-        self.path_checkpoints = f"./models/{self.model}/{self.dataset}/{self.experiment}/checkpoints/"
-        self.path_logs = f"./models/{self.model}/{self.dataset}/{self.experiment}/logs/"
-        self.path_visuals = f"./models/{self.model}/{self.dataset}/{self.experiment}/visuals/"
+        self.path_checkpoints = f"./logs/{self.model}/{self.dataset}/{self.experiment}/checkpoints/"
+        self.path_logs = f"./logs/{self.model}/{self.dataset}/{self.experiment}/logs/"
+        self.path_visuals = f"./logs/{self.model}/{self.dataset}/{self.experiment}/visuals/"
 
     @property
     def path_checkpoints(self):
