@@ -52,21 +52,23 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False):
     start_time = time.time()
 
     if verbose:
-        print(paint("Applying Train-Valid-Test Split ..."))
+        print(paint("Applying Split-Validation..."))
 
     results_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 't_loss', 't_acc', 't_fm', 't_fw', 'v_loss', 'v_acc',
                                           'v_fm', 'v_fw'])
     test_results_array = pd.DataFrame(columns=['v_type', 'seed', 'test_loss', 'test_acc', 'test_fm', 'test_fw'])
 
     preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
+    base_path_checkpoints = model.path_checkpoints
 
     for seed in seeds:
         if verbose:
             print(paint("Running with random seed set to {0}...".format(str(seed))))
+        model.path_checkpoints = base_path_checkpoints + f"/seed_{seed}"
         seed_torch(seed)
         t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion = \
             train_model(model, train_data, val_data, seed=seed, verbose=True, **train_args)
-        _, _, _, _, _, val_preds = eval_model(model, criterion, val_data, seed=seed)
+        _, _, _, _, _, val_preds = eval_model(model, val_data, criterion, seed=seed)
         loss_test, acc_test, fm_test, fw_test, elapsed, test_preds = eval_model(model, criterion, test_data, seed=seed)
 
         results_row = {'v_type': 'split',
@@ -146,7 +148,7 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
         seed_torch(seed)
         for i, val_user in enumerate(users):
 
-            model.path_checkpoints = base_path_checkpoints + f"/{seed}/" + val_user
+            model.path_checkpoints = base_path_checkpoints + f"/seed_{seed}/" + val_user
 
             train_users = users.copy()
             train_users.remove(val_user)
@@ -171,7 +173,7 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
                            }
             results_array = results_array.append(results_row, ignore_index=True)
 
-            _, _, _, _, _, val_preds = eval_model(model, criterion, val_dataset, seed=seed)
+            _, _, _, _, _, val_preds = eval_model(model, val_dataset, criterion, seed=seed)
 
             preds_row = {'v_type': 'loso',
                          'seed': seed,

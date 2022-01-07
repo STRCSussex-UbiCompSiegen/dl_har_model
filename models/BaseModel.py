@@ -13,16 +13,17 @@ from utils import makedir
 
 class BaseModel(nn.Module):
 
-    def __init__(self, dataset, model, experiment='default'):
+    def __init__(self, dataset, model, timestamp, experiment='default'):
         super(BaseModel, self).__init__()
 
         self.model = model
         self.dataset = dataset
+        self.timestamp = timestamp
         self.experiment = experiment
 
-        self.path_checkpoints = f"./logs/{self.model}/{self.dataset}/{self.experiment}/checkpoints/"
-        self.path_logs = f"./logs/{self.model}/{self.dataset}/{self.experiment}/logs/"
-        self.path_visuals = f"./logs/{self.model}/{self.dataset}/{self.experiment}/visuals/"
+        self.path_checkpoints = f"./logs/{self.model}/{self.dataset}/{self.experiment}/{self.timestamp}/checkpoints/"
+        self.path_logs = f"./logs/{self.model}/{self.dataset}/{self.experiment}/{self.timestamp}/logs/"
+        self.path_visuals = f"./logs/{self.model}/{self.dataset}/{self.experiment}/{self.timestamp}/visuals/"
 
     @property
     def path_checkpoints(self):
