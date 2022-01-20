@@ -1,3 +1,5 @@
+import os
+import random
 import torch
 from torch import nn
 import numpy as np
@@ -153,3 +155,114 @@ def mixup_data(x, y, alpha=0.4):
     y_a_y_b_lam = torch.cat([y[:, None].float(), y1[:, None].float(), lam[:, None].float()], 1)
 
     return mixed_x, y_a_y_b_lam
+
+
+def init_weights(model, method):
+    """
+    Weight initialization of network (initialises all LSTM, Conv2D and Linear layers according to weight_init parameter
+    of network)
+
+    :param model: network of which weights are to be initialised
+    :param str method: Method to initialise weights
+    :return: network with initialised weights
+    """
+    for m in model.modules():
+        if isinstance(m, nn.Linear) or type(m) == nn.Conv1d or type(m) == nn.Conv2d:
+            if method == 'normal':
+                torch.nn.init.normal_(m.weight)
+            elif method == 'orthogonal':
+                torch.nn.init.orthogonal_(m.weight)
+            elif method == 'xavier_uniform':
+                torch.nn.init.xavier_uniform_(m.weight)
+            elif method == 'xavier_normal':
+                torch.nn.init.xavier_normal_(m.weight)
+            elif method == 'kaiming_uniform':
+                torch.nn.init.kaiming_uniform_(m.weight)
+            elif method == 'kaiming_normal':
+                torch.nn.init.kaiming_normal_(m.weight)
+            nn.init.constant_(m.bias, 0)
+            # LSTM initialisation
+        elif isinstance(m, nn.LSTM):
+            for name, param in m.named_parameters():
+                if 'weight_ih' in name:
+                    if method == 'normal':
+                        torch.nn.init.normal_(param.data)
+                    elif method == 'orthogonal':
+                        torch.nn.init.orthogonal_(param.data)
+                    elif method == 'xavier_uniform':
+                        torch.nn.init.xavier_uniform_(param.data)
+                    elif method == 'xavier_normal':
+                        torch.nn.init.xavier_normal_(param.data)
+                    elif method == 'kaiming_uniform':
+                        torch.nn.init.kaiming_uniform_(param.data)
+                    elif method == 'kaiming_normal':
+                        torch.nn.init.kaiming_normal_(param.data)
+                elif 'weight_hh' in name:
+                    if method == 'normal':
+                        torch.nn.init.normal_(param.data)
+                    elif method == 'orthogonal':
+                        torch.nn.init.orthogonal_(param.data)
+                    elif method == 'xavier_uniform':
+                        torch.nn.init.xavier_uniform_(param.data)
+                    elif method == 'xavier_normal':
+                        torch.nn.init.xavier_normal_(param.data)
+                    elif method == 'kaiming_uniform':
+                        torch.nn.init.kaiming_uniform_(param.data)
+                    elif method == 'kaiming_normal':
+                        torch.nn.init.kaiming_normal_(param.data)
+                elif 'bias' in name:
+                    param.data.fill_(0.0)
+    return model
+
+
+def init_loss(loss, smoothing, weights, train_on_gpu):
+    """
+    Initialises an loss object for a given network.
+
+    :return: loss object
+    """
+    if weights is not None and train_on_gpu:
+        weights = weights.cuda()
+    if loss == 'CrossEntropy' or loss == 'cross-entropy' or loss == 'ce':
+        criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=smoothing)
+    return criterion
+
+
+def init_optimizer(network, optimizer, lr, weight_decay):
+    """
+    Initialises an optimizer object for a given network.
+
+    :param network: network for which optimizer and loss are to be initialised
+    :return: optimizer object
+    """
+    # define optimizer and loss
+    if optimizer == 'adadelta' or optimizer == 'AdaDelta':
+        opt = torch.optim.Adadelta(network.parameters(), lr=lr, weight_decay=weight_decay)
+    elif optimizer == 'adam' or optimizer == 'Adam':
+        opt = torch.optim.Adam(network.parameters(), lr=lr, weight_decay=weight_decay)
+    elif optimizer == 'rmsprop' or optimizer == 'RMSProp':
+        opt = torch.optim.RMSprop(network.parameters(), lr=lr, weight_decay=weight_decay)
+    return opt
+
+
+def init_scheduler(optimizer, lr_schedule, lr_step, lr_decay):
+    if lr_schedule == 'step':
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_step, gamma=lr_decay)
+    elif lr_schedule == 'plateau':
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=lr_step, factor=lr_decay)
+    return scheduler
+
+
+def seed_torch(seed):
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ":16:8"
+    os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
+    torch.use_deterministic_algorithms(True)

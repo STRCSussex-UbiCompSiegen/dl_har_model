@@ -21,8 +21,8 @@ from torch.utils.data import DataLoader
 
 from dl_har_model.eval import eval_one_epoch, eval_model
 from utils import paint, AverageMeter
-from dl_har_model.model_utils import init_weights, init_loss, init_optimizer, init_scheduler, seed_torch
-from dl_har_model.train_utils import compute_center_loss, get_center_delta, mixup_data, MixUpLoss
+from dl_har_model.train_utils import compute_center_loss, get_center_delta, mixup_data, MixUpLoss, init_weights, \
+    init_loss, init_optimizer, init_scheduler, seed_torch
 from dl_har_dataloader.datasets import SensorDataset
 
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
@@ -207,7 +207,7 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
 def train_model(model, train_data, val_data, batch_size_train=256, batch_size_test=256, optimizer='Adam',
                 use_weights=True, lr=0.001, lr_schedule='step', lr_step=10, lr_decay=0.9, weights_init='orthogonal',
                 epochs=300, print_freq=100, loss='CrossEntropy', smoothing=0.0, weight_decay=0.0, seed=1,
-                centerloss=False, lr_cent=1e-4, beta=0.5, mixup=False, alpha=0.5, verbose=False):
+                centerloss=False, lr_cent=1e-4, beta=0.5, mixup=False, alpha=0.5, verbose=False, save_checkpoints=False):
     """
     Train model for a number of epochs.
 
@@ -235,6 +235,7 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     :param bool mixup: Whether to implement data augmentation with mixup.
     :param float alpha: Controls the distribution of labels for mixup.
 
+    :param bool save_checkpoints: A boolean indicating whether to save checkpoints during model training.
     :param bool verbose: A boolean indicating whether to print results.
     :param int seed: Random seed which is to be used.
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs
@@ -324,11 +325,12 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
                 checkpoint, os.path.join(path_checkpoints, "checkpoint_best.pth")
             )
 
-        if epoch % 5 == 0:
-            torch.save(
-                checkpoint,
-                os.path.join(path_checkpoints, f"checkpoint_{epoch}.pth")
-            )
+        if save_checkpoints:
+            if epoch % 5 == 0:
+                torch.save(
+                    checkpoint,
+                    os.path.join(path_checkpoints, f"checkpoint_{epoch}.pth")
+                )
 
         if lr_step > 0:
             scheduler.step()

@@ -62,7 +62,7 @@ def eval_model(model, eval_data, criterion=None, batch_size=256, seed=1):
 
     elapsed = round(time.time() - start_time)
     elapsed = str(timedelta(seconds=elapsed))
-    print(paint(f"[Finished HAR evaluation loop (h:m:s): {elapsed}"))
+    print(paint(f"Finished HAR evaluation loop (h:m:s): {elapsed}"))
 
     return loss_test, acc_test, fm_test, fw_test, elapsed, preds
 
