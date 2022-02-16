@@ -69,7 +69,7 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False):
         t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion = \
             train_model(model, train_data, val_data, seed=seed, verbose=True, **train_args)
         _, _, _, _, _, val_preds = eval_model(model, val_data, criterion, seed=seed)
-        loss_test, acc_test, fm_test, fw_test, elapsed, test_preds = eval_model(model, criterion, test_data, seed=seed)
+        loss_test, acc_test, fm_test, fw_test, elapsed, test_preds = eval_model(model, test_data, criterion, seed=seed)
 
         results_row = {'v_type': 'split',
                        'seed': seed,
