@@ -138,7 +138,8 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
     preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
 
     num_users = len(glob(os.path.join(dataset_args['path_processed'], 'User_*.npz')))
-    users = [f'User_{i}' for i in range(num_users)]
+    users = [os.path.splitext(os.path.basename(x))[0] for x in glob(os.path.join(dataset_args['path_processed'],
+                                                                                 'User_*.npz'))]
 
     base_path_checkpoints = model.path_checkpoints
 
