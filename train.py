@@ -54,11 +54,11 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False):
     if verbose:
         print(paint("Applying Split-Validation..."))
 
-    results_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 't_loss', 't_acc', 't_fm', 't_fw', 'v_loss', 'v_acc',
-                                          'v_fm', 'v_fw'])
-    test_results_array = pd.DataFrame(columns=['v_type', 'seed', 'test_loss', 'test_acc', 'test_fm', 'test_fw'])
+    # Initialize lists of dictionaries to store results
+    results_list = []
+    test_results_list = []
+    preds_list = []
 
-    preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
     base_path_checkpoints = model.path_checkpoints
 
     for seed in seeds:
@@ -99,9 +99,14 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False):
                      'test_preds': test_preds.tolist(),
                      }
 
-        results_array = results_array.append(results_row, ignore_index=True)
-        test_results_array = test_results_array.append(tests_results_row, ignore_index=True)
-        preds_array = preds_array.append(preds_row, ignore_index=True)
+        results_list = results_list.append(results_row)
+        test_results_list = test_results_list.append(tests_results_row)
+        preds_list = preds_list(preds_row)
+
+    # After the loop, convert lists of dictionaries to DataFrames
+    results_array = pd.DataFrame(results_list)
+    test_results_array = pd.DataFrame(test_results_list)
+    preds_array = pd.DataFrame(preds_list)
 
     elapsed = round(time.time() - start_time)
     elapsed = str(timedelta(seconds=elapsed))
