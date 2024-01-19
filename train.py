@@ -99,9 +99,9 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False):
                      'test_preds': test_preds.tolist(),
                      }
 
-        results_list = results_list.append(results_row)
-        test_results_list = test_results_list.append(tests_results_row)
-        preds_list = preds_list.append(preds_row)
+        results_list.append(results_row)
+        test_results_list.append(tests_results_row)
+        preds_list.append(preds_row)
 
     # After the loop, convert lists of dictionaries to DataFrames
     results_array = pd.DataFrame(results_list)
@@ -177,7 +177,7 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
                            'v_fw': v_fw
                            }
 
-            results_list = results_list.append(results_row)
+            results_list.append(results_row)
 
             _, _, _, _, _, val_preds = eval_model(model, val_dataset, criterion, seed=seed)
 
@@ -188,7 +188,7 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
                          'test_preds': None,
                          }
 
-            preds_list = preds_list.append(preds_row)
+            preds_list.append(preds_row)
 
             if verbose:
                 print("SUBJECT: {}/{}".format(i + 1, num_users),
