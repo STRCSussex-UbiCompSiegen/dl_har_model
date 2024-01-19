@@ -54,11 +54,11 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False):
     if verbose:
         print(paint("Applying Split-Validation..."))
 
-    results_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 't_loss', 't_acc', 't_fm', 't_fw', 'v_loss', 'v_acc',
-                                          'v_fm', 'v_fw'])
-    test_results_array = pd.DataFrame(columns=['v_type', 'seed', 'test_loss', 'test_acc', 'test_fm', 'test_fw'])
+    # Initialize lists of dictionaries to store results
+    results_list = []
+    test_results_list = []
+    preds_list = []
 
-    preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
     base_path_checkpoints = model.path_checkpoints
 
     for seed in seeds:
@@ -99,9 +99,14 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False):
                      'test_preds': test_preds.tolist(),
                      }
 
-        results_array = results_array.append(results_row, ignore_index=True)
-        test_results_array = test_results_array.append(tests_results_row, ignore_index=True)
-        preds_array = preds_array.append(preds_row, ignore_index=True)
+        results_list.append(results_row)
+        test_results_list.append(tests_results_row)
+        preds_list.append(preds_row)
+
+    # After the loop, convert lists of dictionaries to DataFrames
+    results_array = pd.DataFrame(results_list)
+    test_results_array = pd.DataFrame(test_results_list)
+    preds_array = pd.DataFrame(preds_list)
 
     elapsed = round(time.time() - start_time)
     elapsed = str(timedelta(seconds=elapsed))
@@ -132,10 +137,9 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
     if verbose:
         print(paint("Applying Leave-One-Subject-Out Cross-Validation ..."))
 
-    results_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 't_loss', 't_acc', 't_fm', 't_fw', 'v_loss', 'v_acc',
-                                          'v_fm', 'v_fw'])
-
-    preds_array = pd.DataFrame(columns=['v_type', 'seed', 'sbj', 'val_preds', 'test_preds'])
+    # Initialize lists of dictionaries to store results
+    results_list = []
+    preds_list = []
 
     num_users = len(glob(os.path.join(dataset_args['path_processed'], 'User_*.npz')))
     users = [os.path.splitext(os.path.basename(x))[0] for x in glob(os.path.join(dataset_args['path_processed'],
@@ -172,7 +176,8 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
                            'v_fm': v_fm,
                            'v_fw': v_fw
                            }
-            results_array = results_array.append(results_row, ignore_index=True)
+
+            results_list.append(results_row)
 
             _, _, _, _, _, val_preds = eval_model(model, val_dataset, criterion, seed=seed)
 
@@ -183,7 +188,7 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
                          'test_preds': None,
                          }
 
-            preds_array = preds_array.append(preds_row, ignore_index=True)
+            preds_list.append(preds_row)
 
             if verbose:
                 print("SUBJECT: {}/{}".format(i + 1, num_users),
@@ -195,6 +200,10 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
                       "Valid Acc: {:.4f}".format(v_acc[-1]),
                       "Valid F1 (M): {:.4f}".format(v_fm[-1]),
                       "Valid F1 (W): {:.4f}".format(v_fw[-1]))
+
+    # After the loop, convert lists of dictionaries to DataFrames
+    results_array = pd.DataFrame(results_list)
+    preds_array = pd.DataFrame(preds_list)
 
     elapsed = round(time.time() - start_time)
     elapsed = str(timedelta(seconds=elapsed))
