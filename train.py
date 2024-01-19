@@ -101,7 +101,7 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False):
 
         results_list = results_list.append(results_row)
         test_results_list = test_results_list.append(tests_results_row)
-        preds_list = preds_list(preds_row)
+        preds_list = preds_list.append(preds_row)
 
     # After the loop, convert lists of dictionaries to DataFrames
     results_array = pd.DataFrame(results_list)
