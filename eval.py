@@ -67,7 +67,7 @@ def eval_model(model, eval_data, criterion=None, batch_size=256, seed=1):
     return loss_test, acc_test, fm_test, fw_test, elapsed, preds
 
 
-def eval_one_epoch(model, loader, criterion, return_preds=False):
+def eval_one_epoch(model, loader, criterion, return_preds=False, return_pairs=False):
     """
     Train model for a one of epoch.
 
@@ -75,6 +75,7 @@ def eval_one_epoch(model, loader, criterion, return_preds=False):
     :param loader: A DataLoader object containing the data to be used for evaluating the model.
     :param criterion: The loss object.
     :param return_preds: Boolean indicating whether to return predictions or not.
+    :param return_pairs: Boolean indicating whether to return pairs of predictions and targets or not.
 
     :return: loss, accuracy, f1 weighted and macro for evaluation data; if return_preds, also predictions
     """
@@ -114,5 +115,7 @@ def eval_one_epoch(model, loader, criterion, return_preds=False):
 
     if return_preds:
         return losses.avg, acc, fm, fw, y_pred
+    elif return_pairs:
+        return losses.avg, acc, fm, fw, (y_true, y_pred)
     else:
         return losses.avg, acc, fm, fw
