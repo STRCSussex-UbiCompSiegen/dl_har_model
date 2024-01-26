@@ -158,7 +158,7 @@ class AttendAndDiscriminate(BaseModel):
             experiment='Default',
             isdeeper=False,
     ):
-        super(AttendAndDiscriminate, self).__init__(dataset, model)
+        super(AttendAndDiscriminate, self).__init__(dataset, model, experiment)
 
         self.experiment = experiment
         self.model = model
