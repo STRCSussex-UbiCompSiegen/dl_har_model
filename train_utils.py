@@ -217,7 +217,7 @@ def init_weights(model, method):
 
 def init_loss(loss, smoothing, weights, train_on_gpu):
     """
-    Initialises an loss object for a given network.
+    Initialises a loss object for a given network.
 
     :return: loss object
     """
@@ -225,6 +225,8 @@ def init_loss(loss, smoothing, weights, train_on_gpu):
         weights = weights.cuda()
     if loss == 'CrossEntropy' or loss == 'cross-entropy' or loss == 'ce':
         criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=smoothing)
+    else:
+        raise ValueError(f'Loss {loss} not supported')
     return criterion
 
 
@@ -233,6 +235,9 @@ def init_optimizer(network, optimizer, lr, weight_decay):
     Initialises an optimizer object for a given network.
 
     :param network: network for which optimizer and loss are to be initialised
+    :param str optimizer: optimizer to be used
+    :param float lr: learning rate
+    :param float weight_decay: weight decay
     :return: optimizer object
     """
     # define optimizer and loss
@@ -242,6 +247,8 @@ def init_optimizer(network, optimizer, lr, weight_decay):
         opt = torch.optim.Adam(network.parameters(), lr=lr, weight_decay=weight_decay)
     elif optimizer == 'rmsprop' or optimizer == 'RMSProp':
         opt = torch.optim.RMSprop(network.parameters(), lr=lr, weight_decay=weight_decay)
+    else:
+        raise ValueError(f'Optimizer {optimizer} not supported')
     return opt
 
 
@@ -250,6 +257,8 @@ def init_scheduler(optimizer, lr_schedule, lr_step, lr_decay):
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_step, gamma=lr_decay)
     elif lr_schedule == 'plateau':
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=lr_step, factor=lr_decay)
+    else:
+        raise ValueError(f'Learning rate schedule {lr_schedule} not supported')
     return scheduler
 
 
