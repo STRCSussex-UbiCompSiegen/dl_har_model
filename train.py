@@ -28,7 +28,7 @@ from dl_har_dataloader.datasets import SensorDataset
 train_on_gpu = torch.cuda.is_available()  # Check for cuda
 
 
-def split_validate(model, train_args, dataset_args, seeds=None, verbose=False, keep_scaling_params=False):
+def split_validate(model, train_args, dataset_args, seeds=None, verbose=False, keep_scaling_params=False, train_prefix="train"):
     """
     Train model for a number of epochs using split validation.
 
@@ -39,10 +39,14 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False, k
     :param verbose: A boolean indicating whether to print results.
     :param list seeds: A dict containing all random seeds used for training.
     :param bool keep_scaling_params: A boolean indicating whether to keep the scaling parameters from the training set
+    for the validation and test sets.
+    :param str train_prefix: A string indicating the prefix of the training data files. Default 'train'.
     :return: training and validation losses, accuracies, f1 weighted and macro across epochs and raw predictions
     """
 
-    train_data = SensorDataset(prefix='train', **dataset_args)
+    train_prefix = dataset_args.pop('prefix', None)
+    print("train_prefix", train_prefix)
+    train_data = SensorDataset(prefix=train_prefix, **dataset_args)
     if keep_scaling_params:
         # keep these values for val and test datasets
         dataset_args['mean'] = train_data.mean
