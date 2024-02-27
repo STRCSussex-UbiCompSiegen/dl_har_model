@@ -47,12 +47,14 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False, k
     train_prefix = dataset_args.pop('prefix', None)
     print("train_prefix", train_prefix)
     train_data = SensorDataset(prefix=train_prefix, **dataset_args)
+
     if keep_scaling_params:
         # keep these values for val and test datasets
         dataset_args['mean'] = train_data.mean
         dataset_args['std'] = train_data.std
         dataset_args['min_vals'] = train_data.min_vals
         dataset_args['max_vals'] = train_data.max_vals
+
     val_data = SensorDataset(prefix='val', **dataset_args)
     test_data = SensorDataset(prefix='test', **dataset_args)
     if seeds is None:
@@ -76,8 +78,9 @@ def split_validate(model, train_args, dataset_args, seeds=None, verbose=False, k
             print(paint("Running with random seed set to {0}...".format(str(seed))))
         model.path_checkpoints = base_path_checkpoints + f"/seed_{seed}"
         seed_torch(seed)
+        # Currently, passing test_data for train_model() as well for debugging purpose (not used for training the model)
         t_loss, t_acc, t_fm, t_fw, v_loss, v_acc, v_fm, v_fw, criterion = \
-            train_model(model, train_data, val_data, seed=seed, verbose=True, **train_args)
+            train_model(model, train_data, val_data, test_data, seed=seed, verbose=True, **train_args)  # Needs to be val_data
         _, _, _, _, _, val_preds = eval_model(model, val_data, criterion, seed=seed)
         loss_test, acc_test, fm_test, fw_test, elapsed, test_preds = eval_model(model, test_data, criterion, seed=seed)
 
@@ -224,7 +227,7 @@ def loso_cross_validate(model, train_args, dataset_args, seeds, verbose=False):
     return results_array, None, preds_array
 
 
-def train_model(model, train_data, val_data, batch_size_train=256, batch_size_test=256, optimizer='Adam',
+def train_model(model, train_data, val_data, test_data=None, batch_size_train=256, batch_size_test=256, optimizer='Adam',
                 use_weights=True, lr=0.001, lr_schedule='step', lr_step=10, lr_decay=0.9, weights_init='orthogonal',
                 epochs=300, print_freq=100, loss='CrossEntropy', smoothing=0.0, weight_decay=0.0, seed=1,
                 centerloss=False, lr_cent=1e-4, beta=0.5, mixup=False, alpha=0.5, verbose=False, save_checkpoints=False):
@@ -234,6 +237,7 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
     :param model: A network object used for training and prediction.
     :param train_data: A SensorDataset containing the data to be used for training the model.
     :param val_data: A SensorDataset containing the data to be used for validating the model.
+    :param test_data: A SensorDataset containing the data to be used for testing the model. (for debugging purposes)
     :param int batch_size_train: Number of windows to process in each training batch (default 256)
     :param int batch_size_test: Number of windows to process in each testing batch (default 256)
     :param str optimizer: Optimizer function to use. Options: 'Adam' or 'RMSProp'. Default 'Adam'.
@@ -263,6 +267,8 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
 
     loader = DataLoader(train_data, batch_size_train, True, worker_init_fn=np.random.seed(int(seed)))
     loader_val = DataLoader(val_data, batch_size_test, False, worker_init_fn=np.random.seed(int(seed)))
+    if test_data is not None:
+        loader_test = DataLoader(test_data, batch_size_test, False, worker_init_fn=np.random.seed(int(seed)))
 
     if use_weights:
         class_weights = torch.from_numpy(class_weight.compute_class_weight('balanced',
@@ -290,6 +296,7 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
 
     t_loss, t_acc, t_fm, t_fw = [], [], [], []
     v_loss, v_acc, v_fm, v_fw = [], [], [], []
+    te_loss, te_acc, te_fm, te_fw = [], [], [], []
 
     path_checkpoints = getattr(model, 'path_checkpoints', './models/custom_model/checkpoints')
 
@@ -311,6 +318,14 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
         v_fm.append(fm_val)
         v_fw.append(fw_val)
 
+        if test_data is not None:
+            loss_test, acc_test, fm_test, fw_test = eval_one_epoch(model, loader_test, criterion)
+            te_loss.append(loss_test)
+            te_acc.append(acc_test)
+            te_fm.append(fm_test)
+            te_fw.append(fw_test)
+
+
         if verbose:
             print(
                 paint(
@@ -327,6 +342,14 @@ def train_model(model, train_data, val_data, batch_size_train=256, batch_size_te
                     f"\tfw: {100 * fw_val:.2f}(%)"
                 )
             )
+            if test_data is not None:
+                print(
+                    paint(
+                        f"[-] Epoch {epoch + 1}/{epochs}"
+                        f"\tTest loss: {loss_test:.2f} \tacc: {100 * acc_test:.2f}(%)\tfm: {100 * fm_test:.2f}(%)"
+                        f"\tfw: {100 * fw_test:.2f}(%)"
+                    )
+                )
 
         checkpoint = {
             "model_state_dict": model.state_dict(),
